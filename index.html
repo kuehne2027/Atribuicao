@@ -179,7 +179,7 @@ function resolverCobertura(nos,extras,pode){
 
 /* ============ REGRAS ============ */
 const MOTIVOS_SAIDA=["Demissão","Mudança de cargo","INSS","Pediu desligamento","Desistiu","Afastamento","Férias","Outro"];
-const TOM={"Demissão":"red","Pediu desligamento":"red","Desistiu":"red","INSS":"amber","Afastamento":"amber","Férias":"amber","Mudou de escala":"accent","Mudança de cargo":"amber","Adicionado":"accent","Adicionado em lote":"accent","Restaurado":"green","Renomeada":"accent"};
+const TOM={"Demissão":"red","Pediu desligamento":"red","Desistiu":"red","INSS":"amber","Afastamento":"amber","Férias":"amber","Mudou de escala":"accent","Mudança de cargo":"amber","ABS lançado":"red","ABS ajustado":"red","Falta marcada":"red","Falta desmarcada":"muted","Escala de folga":"amber","Folga desmarcada":"muted","Veio na folga":"amber","Pulmão: entrou":"amber","Pulmão: saiu":"muted","Troca lançada":"accent","Troca desfeita":"muted","Atribuído na Meli":"green","Atribuição desmarcada":"muted","Sugestão aplicada":"accent","Precisa ajustado":"accent","Adicionado":"accent","Adicionado em lote":"accent","Restaurado":"green","Renomeada":"accent"};
 const norm=s=>(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase();
 const soDig=s=>(s||"").replace(/\D/g,"");
 const fmtCpf=s=>{const d=soDig(s);return d.length===11?d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/,"$1.$2.$3-$4"):(s||"").trim()};
@@ -520,14 +520,14 @@ function Mini({children,ativo,onClick,label,tom}){return html`<button type="butt
 
 const ORIGEM={folga:"veio na folga",sem:"sem solicitação",extra:"diarista/extra"};
 const hh=h=>String(h).padStart(2,"0")+"h";
-function LinhaQuadro({n,dia,mudar,podeEditar}){
+function LinhaQuadro({n,dia,mudar,podeEditar,log=()=>{}}){
   const [aberto,setAberto]=useState(false);
   const g=n.g;const folga=!!dia.folga[g._id];const aus=new Set(dia.ausentes[g._id]||[]);
   const s=folga?{tom:"muted",txt:"folga"}:n.saldo<0?{tom:"red",txt:`falta ${-n.saldo}`}:n.saldo>0?{tom:"amber",txt:`sobra ${n.saldo}`}:{tom:"green",txt:"ok"};
-  const ajPrecisa=d=>mudar(x=>({...x,precisa:{...x.precisa,[g._id]:Math.max(0,n.precisa+d)}}));
-  const togAus=pid=>mudar(x=>{const a=new Set(x.ausentes[g._id]||[]);a.has(pid)?a.delete(pid):a.add(pid);return {...x,ausentes:{...x.ausentes,[g._id]:[...a]}}});
+  const ajPrecisa=d=>{log({tipo:"Precisa ajustado",nome:"Escala "+g.code,escala:g.code,detalhe:`precisa: ${n.precisa} → ${Math.max(0,n.precisa+d)}`});mudar(x=>({...x,precisa:{...x.precisa,[g._id]:Math.max(0,n.precisa+d)}}))};
+  const togAus=pid=>{const p=(g.pessoas||[]).find(z=>z.id===pid)||{};log({tipo:aus.has(pid)?"Falta desmarcada":"Falta marcada",nome:p.nome,cpf:p.cpf,escala:g.code});mudar(x=>{const a=new Set(x.ausentes[g._id]||[]);a.has(pid)?a.delete(pid):a.add(pid);return {...x,ausentes:{...x.ausentes,[g._id]:[...a]}}})};
   const noPulmao=pid=>dia.extras.some(x=>x.pessoaId===pid);
-  const togVeio=p=>mudar(x=>x.extras.some(e=>e.pessoaId===p.id)?{...x,extras:x.extras.filter(e=>e.pessoaId!==p.id)}:{...x,extras:[...x.extras,{id:"x"+p.id,pessoaId:p.id,nome:p.nome,hora:n.hora,origem:"folga",escala:g.code}]});
+  const togVeio=p=>{log({tipo:noPulmao(p.id)?"Pulmão: saiu":"Veio na folga",nome:p.nome,cpf:p.cpf,escala:g.code,detalhe:"bateu às "+hh(n.hora)});mudar(x=>x.extras.some(e=>e.pessoaId===p.id)?{...x,extras:x.extras.filter(e=>e.pessoaId!==p.id)}:{...x,extras:[...x.extras,{id:"x"+p.id,pessoaId:p.id,nome:p.nome,hora:n.hora,origem:"folga",escala:g.code}]})};
   const veio=folga?(g.pessoas||[]).filter(p=>noPulmao(p.id)).length:0;
   return html`<div class="border-t border-[var(--sep)] first:border-t-0">
     <div class="flex items-center gap-2.5 py-2.5 flex-wrap">
@@ -546,7 +546,7 @@ function LinhaQuadro({n,dia,mudar,podeEditar}){
     </div>
     <${AnimatePresence} initial=${false}>${aberto&&html`<${motion.div} key="a" ...${abrir} class="overflow-hidden">
       <div class="pb-3 pl-1">
-        ${podeEditar&&html`<div class="mb-2"><${Mini} ativo=${folga} tom="amber" label=${"Escala "+g.code+" de folga hoje"} onClick=${()=>mudar(x=>({...x,folga:{...x.folga,[g._id]:!folga}}))}>${folga?"✓ De folga hoje":"Marcar escala de folga hoje"}</${Mini}></div>`}
+        ${podeEditar&&html`<div class="mb-2"><${Mini} ativo=${folga} tom="amber" label=${"Escala "+g.code+" de folga hoje"} onClick=${()=>{log({tipo:folga?"Folga desmarcada":"Escala de folga",nome:"Escala "+g.code,escala:g.code});mudar(x=>({...x,folga:{...x.folga,[g._id]:!folga}}))}}>${folga?"✓ De folga hoje":"Marcar escala de folga hoje"}</${Mini}></div>`}
         ${n.vagaFixa>0&&!folga&&html`<div class="text-[12px] mb-2" style=${{color:"var(--red)"}}>Escala incompleta: ${n.vagaFixa} vaga(s) fixa(s)${n.vagas.some(v=>v.nome)?" — saiu: "+n.vagas.filter(v=>v.nome).map(v=>v.nome+(v.motivo?" ("+v.motivo+")":"")).join(", "):""}. Esse furo aparece todo dia até repor no HC.</div>`}
         ${folga?html`<div class="text-[11px] text-muted mb-1.5">Toque em quem veio trabalhar na folga (vai para o pulmão às ${hh(n.hora)}):</div>
           <div class="flex flex-wrap gap-1.5">${(g.pessoas||[]).map(p=>html`<${Mini} key=${p.id} ativo=${noPulmao(p.id)} tom="amber" label=${(noPulmao(p.id)?"Tirar do pulmão ":"Veio trabalhar na folga: ")+p.nome} onClick=${()=>podeEditar&&togVeio(p)}>${noPulmao(p.id)?"✓ ":""}${p.nome}</${Mini}>`)}</div>`
@@ -557,7 +557,7 @@ function LinhaQuadro({n,dia,mudar,podeEditar}){
   </div>`;
 }
 
-function Pulmao({dia,mudar,horas,podeEditar,todos,pode,uso,presentesIds}){
+function Pulmao({dia,mudar,horas,podeEditar,todos,pode,uso,presentesIds,log=()=>{}}){
   const [q,setQ]=useState("");const [sel,setSel]=useState(null);const [origem,setOrigem]=useState("sem");const [hora,setHora]=useState(null);
   const achados=useMemo(()=>{const t=norm(q.trim());const d=q.replace(/\D/g,"");if(t.length<2)return [];
     return todos.filter(p=>norm(p.nome).includes(t)||(d.length>=3&&(p.cpf||"").replace(/\D/g,"").includes(d))).slice(0,6)},[q,todos]);
@@ -569,7 +569,7 @@ function Pulmao({dia,mudar,horas,podeEditar,todos,pode,uso,presentesIds}){
   const pronto=hora!=null&&(sel?!jaTem&&!jaPresente:nomeNovo.length>1);
   const add=()=>{if(!pronto)return;
     const item=sel?{id:"x"+sel.id,pessoaId:sel.id,nome:sel.nome,hora,origem,escala:sel.code}:{id:"x"+Date.now().toString(36),nome:nomeNovo,hora,origem:"extra"};
-    mudar(x=>({...x,extras:[...x.extras,item]}));limpar()};
+    log({tipo:"Pulmão: entrou",nome:item.nome,cpf:sel?sel.cpf:"",escala:item.escala||"",detalhe:`${ORIGEM[item.origem]} · bateu às ${hh(item.hora)}`});mudar(x=>({...x,extras:[...x.extras,item]}));limpar()};
   const horasDe=x=>x.hora!=null?horas.filter(d=>pode(x.hora,d)):(x.horas||[]);
   return html`<${Card} title="Pulmão do dia" right=${html`<span class="text-[12px] text-muted">${dia.extras.length} pessoa(s)</span>`}>
     <div class="text-[12px] text-muted mb-3">Quem veio sem estar no quadro: de folga, sem solicitação ou diarista. Cada um só cobre horário compatível com a hora em que bateu o ponto, e o painel usa primeiro o mesmo horário.</div>
@@ -592,7 +592,7 @@ function Pulmao({dia,mudar,horas,podeEditar,todos,pode,uso,presentesIds}){
       <span class="min-w-0 flex-1 text-[14px]">${x.nome} <${Pill} tom="amber">${ORIGEM[x.origem]||"extra"}</${Pill}>
         <span class="block text-[11px] text-muted">${x.hora!=null?`bateu às ${hh(x.hora)}${x.escala?" · escala "+x.escala:""} · `:""}pode cobrir: ${horasDe(x).map(hh).join(", ")||"—"}</span>
         <span class="block text-[11px] font-semibold" style=${{color:u?"var(--green)":"var(--muted)"}}>${u?"✓ usado → "+u:"sobrando no pulmão"}</span></span>
-      ${podeEditar&&html`<${BtnMini} perigo label=${"Tirar "+x.nome+" do pulmão"} onClick=${()=>mudar(y=>({...y,extras:y.extras.filter(z=>z.id!==x.id)}))}>Tirar</${BtnMini}>`}
+      ${podeEditar&&html`<${BtnMini} perigo label=${"Tirar "+x.nome+" do pulmão"} onClick=${()=>{log({tipo:"Pulmão: saiu",nome:x.nome,escala:x.escala||""});mudar(y=>({...y,extras:y.extras.filter(z=>z.id!==x.id)}))}}>Tirar</${BtnMini}>`}
     </div>`}):html`<div class="text-[13px] text-muted">Ninguém no pulmão hoje.</div>`}
   </${Card}>`;
 }
@@ -710,18 +710,18 @@ function VagasFixas({nos,compacto}){
 }
 
 /* ---- LANÇAR O DIA: ABS por escala, escalas com gente a menos e trocas ---- */
-function Lancar({calc,mudar,podeEditar}){
+function Lancar({calc,mudar,podeEditar,log=()=>{}}){
   const {nos}=calc;const ativos=nos.filter(n=>!n.folga).sort((a,b)=>a.hora-b.hora||String(a.g.code).localeCompare(String(b.g.code)));
   const opc=ativos.map(n=>html`<option key=${n.id} value=${n.id}>${n.g.code} · ${n.label}</option>`);
   const [gAbs,setGAbs]=useState("");const [qAbs,setQAbs]=useState(1);
-  const addAbs=()=>{if(!gAbs)return;mudar(x=>({...x,absQtd:{...(x.absQtd||{}),[gAbs]:((x.absQtd||{})[gAbs]||0)+qAbs}}));setGAbs("");setQAbs(1)};
-  const ajAbs=(gid,d)=>mudar(x=>{const v=Math.max(0,((x.absQtd||{})[gid]||0)+d);const a={...(x.absQtd||{})};if(v)a[gid]=v;else delete a[gid];return {...x,absQtd:a}});
+  const addAbs=()=>{if(!gAbs)return;const gg=nos.find(n=>n.id===gAbs);log({tipo:"ABS lançado",nome:"Escala "+(gg?gg.g.code:""),escala:gg?gg.g.code:"",detalhe:`${qAbs} ABS`});mudar(x=>({...x,absQtd:{...(x.absQtd||{}),[gAbs]:((x.absQtd||{})[gAbs]||0)+qAbs}}));setGAbs("");setQAbs(1)};
+  const ajAbs=(gid,d)=>{const gg=nos.find(n=>n.id===gid);log({tipo:"ABS ajustado",nome:"Escala "+(gg?gg.g.code:""),escala:gg?gg.g.code:"",detalhe:`ABS: ${gg?gg.abs:0} → ${Math.max(0,(gg?gg.abs:0)+d)}`});mudar(x=>{const v=Math.max(0,((x.absQtd||{})[gid]||0)+d);const a={...(x.absQtd||{})};if(v)a[gid]=v;else delete a[gid];return {...x,absQtd:a}})};
   const comAbs=nos.filter(n=>n.abs>0);
   const [q,setQ]=useState("");const [sel,setSel]=useState(null);const [para,setPara]=useState("");
   const achados=useMemo(()=>{const t=norm(q.trim());const d=dg(q);if(t.length<2||sel)return [];
     return calc.todos.filter(p=>norm(p.nome).includes(t)||(d.length>=3&&dg(p.cpf).includes(d))).slice(0,6)},[q,calc.todos,sel]);
   const jaTrocado=sel&&calc.trocas.some(t=>t.pessoaId===sel.id&&!t.pulmaoId);
-  const addTroca=()=>{if(!sel||!para||para===sel.gid||jaTrocado)return;
+  const addTroca=()=>{if(!sel||!para||para===sel.gid||jaTrocado)return;const gg=nos.find(n=>n.id===para);log({tipo:"Troca lançada",nome:sel.nome,cpf:sel.cpf,escala:sel.code,para:gg?gg.g.code:""});
     mudar(x=>({...x,trocas:[...(x.trocas||[]),{id:"t"+Date.now().toString(36),pessoaId:sel.id,nome:sel.nome,cpf:sel.cpf||"",de:sel.gid,para,feito:false}]}));setQ("");setSel(null);setPara("")};
   const sub=t=>html`<div class="text-[11px] uppercase tracking-[.14em] text-muted font-semibold mt-5 mb-2 first:mt-0">${t}</div>`;
   return html`<${Card} title="Lançar o dia">
@@ -758,11 +758,11 @@ function Lancar({calc,mudar,podeEditar}){
 }
 let pode0=()=>true; /* regra de horário atual (definida pela aba Cobertura) */
 
-function FuroItem({n,calc,pode,mudar,podeEditar}){
+function FuroItem({n,calc,pode,mudar,podeEditar,log=()=>{}}){
   const [mais,setMais]=useState(false);
   const o=opcoesPara(n,calc,pode);
-  const usar=(p,m)=>mudar(x=>({...x,trocas:[...(x.trocas||[]),{id:"t"+Date.now().toString(36)+Math.random().toString(36).slice(2,5),pessoaId:p.id,nome:p.nome,cpf:p.cpf||"",de:m.id,para:n.id,feito:false}]}));
-  const usarP=x=>{const pes=x.pessoaId?calc.todos.find(t=>t.id===x.pessoaId):null;
+  const usar=(p,m)=>{log({tipo:"Troca lançada",nome:p.nome,cpf:p.cpf,escala:m.g.code,para:n.g.code,detalhe:"cobre: "+n.motivos.slice(0,n.falta).map(motNome).join(", ")});mudar(x=>({...x,trocas:[...(x.trocas||[]),{id:"t"+Date.now().toString(36)+Math.random().toString(36).slice(2,5),pessoaId:p.id,nome:p.nome,cpf:p.cpf||"",de:m.id,para:n.id,feito:false}]}))};
+  const usarP=x=>{const pes=x.pessoaId?calc.todos.find(t=>t.id===x.pessoaId):null;log({tipo:"Troca lançada",nome:x.nome,cpf:pes?pes.cpf:"",escala:"pulmão",para:n.g.code,detalhe:"cobre: "+n.motivos.slice(0,n.falta).map(motNome).join(", ")});
     mudar(y=>({...y,trocas:[...(y.trocas||[]),{id:"t"+Date.now().toString(36),pulmaoId:x.id,pessoaId:x.pessoaId||null,nome:x.nome,cpf:pes?pes.cpf||"":"",de:null,para:n.id,origem:x.origem,feito:false}]}))};
   const chip=(txt,on,tom,label)=>html`<button type="button" disabled=${!podeEditar} onClick=${on} aria-label=${label} class="text-[12px] font-medium px-2.5 py-1 rounded-full border transition-colors hover:brightness-110" style=${{background:fundoTom(tom),borderColor:"transparent",color:corTom(tom)}}>${txt}</button>`;
   const pessoasDe=m=>m.presentes.filter(p=>!p.troca);
@@ -778,14 +778,14 @@ function FuroItem({n,calc,pode,mudar,podeEditar}){
       ${mais&&html`<div class="mt-1.5">${o.puxar.map(m=>html`<div key=${m.id} class="mb-1.5"><div class="text-[12px]"><b>${m.g.code}</b> <span class="text-muted">· ${m.label}${m.saldo<0?" · já falta "+(-m.saldo):""}</span></div><div class="flex flex-wrap gap-1.5 mt-1">${pessoasDe(m).slice(0,8).map(p=>html`<span key=${p.id}>${chip(p.nome,()=>usar(p,m),"amber","Trocar "+p.nome+" da "+m.g.code+" para "+n.g.code+" (abre furo)")}</span>`)}</div></div>`)}</div>`}</div>`}
   </div>`;
 }
-function FurosAbertos({calc,pode,mudar,podeEditar}){
+function FurosAbertos({calc,pode,mudar,podeEditar,log}){
   const lista=calc.nos.filter(n=>!n.folga&&n.falta>0).sort((a,b)=>a.hora-b.hora);
   return html`<${Card} title="Furos em aberto" right=${html`<${Pill} tom=${lista.length?"red":"green"}>${calc.abertos}</${Pill}>`}>
-    ${lista.length?html`<div class="grid gap-3">${lista.map(n=>html`<${FuroItem} key=${n.id} n=${n} calc=${calc} pode=${pode} mudar=${mudar} podeEditar=${podeEditar}/>`)}</div>`
+    ${lista.length?html`<div class="grid gap-3">${lista.map(n=>html`<${FuroItem} key=${n.id} n=${n} calc=${calc} pode=${pode} mudar=${mudar} podeEditar=${podeEditar} log=${log}/>`)}</div>`
       :html`<div class="text-[14px]" style=${{color:"var(--green)"}}>✓ Nenhum furo em aberto neste dia.</div>`}
   </${Card}>`;
 }
-function Trocas({calc,data,mudar,podeEditar,toast,rot}){
+function Trocas({calc,data,mudar,podeEditar,toast,rot,log=()=>{}}){
   const {trocas,byId}=calc;const pz=prazoDe(data);const nm=id=>byId[id]?byId[id].g.code:"?";
   if(!trocas.length)return null;
   const set=(id,f)=>mudar(x=>({...x,trocas:(x.trocas||[]).map(t=>t.id===id?f(t):t)}));
@@ -795,19 +795,19 @@ function Trocas({calc,data,mudar,podeEditar,toast,rot}){
     <div class="flex items-center gap-2 flex-wrap mb-2"><${Pill} tom=${pz.tom}>${pz.txt}</${Pill}><span class="text-[12px] text-muted">${calc.pend} de ${trocas.length} para atribuir</span></div>
     <div class="text-[12px] text-muted mb-1">Atribua cada pessoa na escala de destino com <b class="text-ink">De ${dm(data)} Até ${dm(data)}</b> e marque ✓. Confira antes se ela não tem credencial ativa nesse dia em outra escala.</div>
     ${trocas.map(t=>{const furoOrigem=t.de&&byId[t.de]&&byId[t.de].falta>0;return html`<div key=${t.id} class="flex items-start gap-2.5 py-2 border-t border-[var(--sep)] first:border-t-0">
-      <input type="checkbox" class="mt-1 w-4 h-4 accent-[var(--accent)]" checked=${!!t.feito} disabled=${!podeEditar} onChange=${()=>set(t.id,x=>({...x,feito:!x.feito}))} aria-label=${"Atribuição de "+t.nome+" feita"}/>
+      <input type="checkbox" class="mt-1 w-4 h-4 accent-[var(--accent)]" checked=${!!t.feito} disabled=${!podeEditar} onChange=${()=>{log({tipo:t.feito?"Atribuição desmarcada":"Atribuído na Meli",nome:t.nome,cpf:t.cpf,escala:t.pulmaoId?"pulmão":nm(t.de),para:nm(t.para)});set(t.id,x=>({...x,feito:!x.feito}))}} aria-label=${"Atribuição de "+t.nome+" feita"}/>
       <span class="min-w-0 flex-1 text-[13px] ${t.feito?"opacity-60":""}"><b>${t.nome}</b>${t.cpf?html` <span class="text-muted tnum">${t.cpf}</span>`:null}
         <span class="block text-[12px]">${t.pulmaoId?html`<span class="text-muted">pulmão (${ORIGEM[t.origem]||"extra"})</span>`:html`<span class="text-muted">era da</span> <b>${nm(t.de)}</b>`} <span class="text-muted">→ foi para</span> <b>${nm(t.para)}</b> <span class="text-muted">· ${byId[t.para]?byId[t.para].label:""}</span></span>
         ${furoOrigem&&html`<span class="block text-[11px]" style=${{color:"var(--red)"}}>abriu furo na ${nm(t.de)}: falta atribuir no lugar de ${t.nome}</span>`}</span>
-      ${podeEditar&&html`<${BtnMini} perigo label=${"Desfazer troca de "+t.nome} onClick=${()=>del(t.id)}>Desfazer</${BtnMini}>`}
+      ${podeEditar&&html`<${BtnMini} perigo label=${"Desfazer troca de "+t.nome} onClick=${()=>{log({tipo:"Troca desfeita",nome:t.nome,cpf:t.cpf,escala:t.pulmaoId?"pulmão":nm(t.de),para:nm(t.para)});del(t.id)}}>Desfazer</${BtnMini}>`}
     </div>`})}
   </${Card}>`;
 }
-function Sugestao({calc,rot,mudar,podeEditar}){
+function Sugestao({calc,rot,mudar,podeEditar,log=()=>{}}){
   const {res}=calc;if(!calc.abertos)return null;
-  const aplicar=()=>mudar(x=>{const novas=[];res.cadeias.forEach(c=>c.passos.forEach(p=>{const id="t"+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+  const aplicar=()=>{log({tipo:"Sugestão aplicada",nome:`${res.movs} troca(s) automáticas`,detalhe:res.cadeias.flatMap(c=>c.passos.map(p=>`${p.pessoa.nome} → ${calc.byId[p.para]?calc.byId[p.para].g.code:"?"}`)).join(" · ")});mudar(x=>{const novas=[];res.cadeias.forEach(c=>c.passos.forEach(p=>{const id="t"+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
     if(p.extra){const xx=calc.pulmao.find(z=>z.id===p.pessoa.id);const pes=xx&&xx.pessoaId?calc.todos.find(t=>t.id===xx.pessoaId):null;novas.push({id,pulmaoId:p.pessoa.id,pessoaId:xx&&xx.pessoaId||null,nome:p.pessoa.nome,cpf:pes?pes.cpf||"":"",de:null,para:p.para,origem:p.origem,feito:false})}
-    else novas.push({id,pessoaId:p.pessoa.id,nome:p.pessoa.nome,cpf:p.pessoa.cpf||"",de:p.de,para:p.para,feito:false})}));return {...x,trocas:[...(x.trocas||[]),...novas]}});
+    else novas.push({id,pessoaId:p.pessoa.id,nome:p.pessoa.nome,cpf:p.pessoa.cpf||"",de:p.de,para:p.para,feito:false})}));return {...x,trocas:[...(x.trocas||[]),...novas]}})};
   return html`<${Card} title="Sugestão automática" right=${res.cadeias.length&&podeEditar?html`<${BtnMini} onClick=${aplicar}>Aplicar sugestão</${BtnMini}>`:null}>
     <div class="text-[12px] text-muted mb-2">O painel acha o jeito com menos trocas, em cadeia se precisar. "Aplicar" lança tudo em Trocas do dia.</div>
     <div class="grid gap-3">${res.cadeias.map((c,i)=>{let ant=motAnt(c.furo.mot);return html`<div key=${i} class="rounded-2xl border border-line p-3.5" style=${{background:"var(--wash)"}}>
@@ -857,6 +857,8 @@ function CoberturaView({escalas,historico,versao,regrasNuvem,podeEditar,toast,ca
   const gravaRegras=n=>{setRegras(n);salvarChave(K_REGRAS,{permitido:n,em:new Date().toISOString()}).catch(()=>toast("Não foi possível salvar as regras.",true))};
   const pode=useCallback((o,d)=>regras[o+">"+d]??regraPadrao(o,d),[regras]);pode0=pode;
   const saidas=useMemo(()=>mapaSaidas(escalas,historico),[escalas,historico]);
+  /* toda ação da cobertura fica gravada no Histórico (banco), com o dia a que se refere */
+  const log=ev=>{if(!podeEditar)return;registrar({area:"cobertura",dia:data,...ev}).then(()=>window.dispatchEvent(new Event("kn-historico"))).catch(()=>toast("A mudança foi salva, mas não entrou no Histórico.",true))};
   const calc=useMemo(()=>calcularDia(escalas,dia,saidas,pode),[escalas,dia,saidas,pode]);
   const {nos,horas,res,pulmao,pulmaoTodo,presentesIds,todos,vagasFixas,abs,byId}=calc;
   const rot=id=>byId[id]?`${byId[id].label} · ${byId[id].g.code}`:id;
@@ -886,20 +888,20 @@ function CoberturaView({escalas,historico,versao,regrasNuvem,podeEditar,toast,ca
       </div>
     </${Card}>
     <div class="md:col-span-6 grid gap-4 min-w-0">
-      <${Lancar} calc=${calc} mudar=${mudar} podeEditar=${podeEditar}/>
-      <${Pulmao} dia=${dia} mudar=${mudar} horas=${horas} podeEditar=${podeEditar} todos=${todos} pode=${pode} uso=${uso} presentesIds=${presentesIds}/>
+      <${Lancar} calc=${calc} mudar=${mudar} podeEditar=${podeEditar} log=${log}/>
+      <${Pulmao} dia=${dia} mudar=${mudar} horas=${horas} podeEditar=${podeEditar} todos=${todos} pode=${pode} uso=${uso} presentesIds=${presentesIds} log=${log}/>
       <${Card} title=${"Quadro completo · "+fmtData(data)} right=${html`<button type="button" onClick=${()=>setVerQuadro(!verQuadro)} aria-expanded=${verQuadro?"true":"false"} class="text-[12px] text-muted hover:text-ink">${verQuadro?"Fechar ▴":"Abrir ▾"}</button>`}>
         <div class="text-[12px] text-muted">Escala por escala: ajustar o "precisa", marcar falta pelo nome, escala de folga e quem veio na folga.</div>
         ${verQuadro&&horas.map(h=>html`<div key=${h} class="mt-3">
           <div class="font-display text-[13px] mb-1" style=${{color:"var(--accent)"}}>${h}h</div>
-          ${porHora[h].map(n=>html`<${LinhaQuadro} key=${n.id} n=${n} dia=${dia} mudar=${mudar} podeEditar=${podeEditar}/>`)}
+          ${porHora[h].map(n=>html`<${LinhaQuadro} key=${n.id} n=${n} dia=${dia} mudar=${mudar} podeEditar=${podeEditar} log=${log}/>`)}
         </div>`)}
       </${Card}>
     </div>
     <div class="md:col-span-6 grid gap-4 min-w-0">
-      <${FurosAbertos} calc=${calc} pode=${pode} mudar=${mudar} podeEditar=${podeEditar}/>
-      <${Trocas} calc=${calc} data=${data} mudar=${mudar} podeEditar=${podeEditar} toast=${toast} rot=${rot}/>
-      <${Sugestao} calc=${calc} rot=${rot} mudar=${mudar} podeEditar=${podeEditar}/>
+      <${FurosAbertos} calc=${calc} pode=${pode} mudar=${mudar} podeEditar=${podeEditar} log=${log}/>
+      <${Trocas} calc=${calc} data=${data} mudar=${mudar} podeEditar=${podeEditar} toast=${toast} rot=${rot} log=${log}/>
+      <${Sugestao} calc=${calc} rot=${rot} mudar=${mudar} podeEditar=${podeEditar} log=${log}/>
       <${Regras} horas=${horas} regras=${regras} podeEditar=${podeEditar} setRegra=${(o,d,v)=>gravaRegras({...regras,[o+">"+d]:v})} restaurar=${()=>gravaRegras({})}/>
     </div>`}
   </${motion.div}>`;
@@ -907,12 +909,14 @@ function CoberturaView({escalas,historico,versao,regrasNuvem,podeEditar,toast,ca
 
 function HistoricoView({historico,escalas,podeEditar,ops}){
   const rot=h=>h.tipo==="Removido"?(h.motivo||"Removido"):h.tipo;
-  const [fil,setFil]=useState("todos");const [busy,setBusy]=useState(null);
-  const cont={};historico.forEach(h=>{const r=rot(h);cont[r]=(cont[r]||0)+1});
+  const [fil,setFil]=useState("todos");const [busy,setBusy]=useState(null);const [area,setArea]=useState("todas");
+  const daArea=historico.filter(h=>area==="todas"||(area==="cobertura")===(h.area==="cobertura"));
+  const cont={};daArea.forEach(h=>{const r=rot(h);cont[r]=(cont[r]||0)+1});
   const chaves=["todos",...Object.keys(cont).sort()];
-  const lista=historico.filter(h=>fil==="todos"||rot(h)===fil);
+  const lista=daArea.filter(h=>fil==="todos"||rot(h)===fil);
+  const nCob=historico.filter(h=>h.area==="cobertura").length;
   const podeDesfazer=new Set();const visto=new Set();
-  historico.forEach(h=>{const k=h.cpf||h.nome;if(visto.has(k))return;visto.add(k);if(h.tipo==="Removido"&&h.pessoa)podeDesfazer.add(h._id)});
+  historico.forEach(h=>{if(h.area==="cobertura")return;const k=h.cpf||h.nome;if(visto.has(k))return;visto.add(k);if(h.tipo==="Removido"&&h.pessoa)podeDesfazer.add(h._id)});
   const dia=iso=>{const d=new Date(iso);return isNaN(d)?"Sem data":d.toLocaleDateString("pt-BR",{weekday:"long",day:"2-digit",month:"2-digit",year:"numeric"})};
   const hora=iso=>{const d=new Date(iso);return isNaN(d)?"":d.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})};
   let ultimo="";
@@ -920,16 +924,17 @@ function HistoricoView({historico,escalas,podeEditar,ops}){
     <${Card} className="md:col-span-12">
       <div class="text-[11px] uppercase tracking-[.16em] text-muted font-semibold">Histórico</div>
       <h1 class="font-display text-4xl sm:text-5xl tracking-tight mt-2 mb-5 tnum"><${CountUp} v=${historico.length}/> <span class="text-muted font-sans text-base">mudança(s) registrada(s)</span></h1>
+      ${historico.length>0&&html`<div class="flex flex-wrap gap-1.5 mb-3">${[["todas","Tudo",historico.length],["escalas","Escalas e pessoas",historico.length-nCob],["cobertura","Cobertura do dia",nCob]].map(([k,t,q])=>html`<${Mini} key=${k} ativo=${area===k} label=${t} onClick=${()=>{setArea(k);setFil("todos")}}>${t} · ${q}</${Mini}>`)}</div>`}
       ${historico.length>0&&html`<${LayoutGroup} id="hfil"><div class="inline-flex flex-wrap gap-1 p-1 rounded-3xl" style=${{background:"var(--wash)"}}>
         ${chaves.map(k=>html`<button key=${k} type="button" onClick=${()=>setFil(k)} aria-pressed=${fil===k} class=${"relative px-3.5 py-1.5 rounded-full text-[12px] font-medium "+(fil===k?"text-[var(--on-accent)]":"text-muted hover:text-ink")}>
           ${fil===k&&html`<${motion.span} layoutId="hpill" class="absolute inset-0 rounded-full" style=${{background:"var(--accent)"}} transition=${spring}/>`}
-          <span class="relative">${k==="todos"?"Tudo":k} · ${k==="todos"?historico.length:cont[k]}</span></button>`)}
+          <span class="relative">${k==="todos"?"Tudo":k} · ${k==="todos"?daArea.length:cont[k]}</span></button>`)}
       </div></${LayoutGroup}>`}
     </${Card}>
     <${Card} className="md:col-span-12">
       ${!lista.length?html`<div class="text-[14px] text-muted">${historico.length?"Nada com esse filtro.":"Nenhuma mudança registrada ainda. Quando você editar, trocar de escala, adicionar ou tirar alguém, aparece aqui."}</div>`:
       lista.map(h=>{const d=dia(h.em);const cab=d!==ultimo;ultimo=d;const r=rot(h);const tom=TOM[r]||"muted";
-        const onde=h.tipo==="Mudou de escala"?`${h.escala} → ${h.para}`:(/^(\d|T\d)/.test(h.escala||"")||h.escala==="Sem código"?"Escala "+h.escala:h.escala||"");
+        const onde=h.area==="cobertura"?`Cobertura do dia ${h.dia?fmtData(h.dia):""}${h.para?` · ${h.escala||"?"} → ${h.para}`:h.escala&&!String(h.nome||"").includes(h.escala)?" · escala "+h.escala:""}`:h.tipo==="Mudou de escala"?`${h.escala} → ${h.para}`:(/^(\d|T\d)/.test(h.escala||"")||h.escala==="Sem código"?"Escala "+h.escala:h.escala||"");
         return html`<${React.Fragment} key=${h._id}>
           ${cab&&html`<div class="text-[11px] uppercase tracking-[.14em] text-muted font-semibold pt-4 pb-2 first:pt-0">${d}</div>`}
           <div class="flex gap-3 py-3 border-t border-[var(--sep)] items-start flex-wrap sm:flex-nowrap">
@@ -1014,7 +1019,8 @@ function App(){
       ch=c.channel("kn-escalas-"+Math.random().toString(36).slice(2,8)).on("postgres_changes",{event:"*",schema:"public",table:TABELA},p=>{const k=(p.new&&p.new.state_key)||(p.old&&p.old.state_key)||"";if(!k||k.startsWith("esc"))agenda()}).subscribe()}catch(e){}})();
     const iv=setInterval(recarregar,60000);const vis=()=>{if(document.visibilityState==="visible")recarregar()};
     document.addEventListener("visibilitychange",vis);window.addEventListener("online",recarregar);
-    return()=>{alive=false;clearInterval(iv);clearTimeout(tm);document.removeEventListener("visibilitychange",vis);window.removeEventListener("online",recarregar);try{ch&&sb.removeChannel(ch)}catch(e){}};
+    const novoHist=()=>{clearTimeout(tm);tm=setTimeout(recarregar,1500)};window.addEventListener("kn-historico",novoHist);
+    return()=>{alive=false;clearInterval(iv);clearTimeout(tm);document.removeEventListener("visibilitychange",vis);window.removeEventListener("online",recarregar);window.removeEventListener("kn-historico",novoHist);try{ch&&sb.removeChannel(ch)}catch(e){}};
   },[recarregar]);
   const {escalas,historico}=dados;
   /* toda gravação: marca "salvando", grava, registra no histórico e relê */
