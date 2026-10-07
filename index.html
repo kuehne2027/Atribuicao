@@ -1,0 +1,1078 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Painel KN</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Onest:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap">
+<script>try{if(localStorage.getItem("kn-painel-tema")==="claro")document.documentElement.setAttribute("data-tema","claro")}catch(e){}</script>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config={theme:{extend:{fontFamily:{display:['Unbounded','system-ui','sans-serif'],sans:['Onest','system-ui','sans-serif'],mono:['"JetBrains Mono"','ui-monospace','monospace']},
+colors:{ink:'var(--ink)',muted:'var(--muted)',line:'var(--line)',accent:'var(--accent)',glass:'var(--glass)'}}}}
+</script>
+<style>
+/* Mesmo visual do Layouts do SVC: nav fixa translúcida, cartões de vidro em grade, fundo com manchas suaves */
+:root{
+  --bg:#07090d; --ink:#eef2f5; --muted:#8c97a3; --line:rgba(255,255,255,.09); --glass:rgba(22,27,34,.55);
+  --accent:#4cc3ff; --amber:#ffb547; --red:#ff6b6e; --green:#3ddc97;
+  --wash:rgba(255,255,255,.045); --sep:rgba(255,255,255,.06); --line2:rgba(255,255,255,.25); --ph:rgba(255,255,255,.22);
+  --navbg:rgba(7,9,13,.72); --overlay:rgba(3,5,8,.72); --modal:rgba(14,18,24,.97); --on-accent:#04121b; --pill:#eef2f5; --on-pill:#000;
+  --grain:rgba(255,255,255,.035); --shadow:none; --a1:.10; --a2:.16; --a3:.3;
+  color-scheme:dark;
+}
+html[data-tema="claro"]{
+  --bg:#f4f8fc; --ink:#082b4a; --muted:#647e95; --line:#d7e5f1; --glass:#ffffff;
+  --accent:#0b7fe8; --amber:#b45f06; --red:#d33b40; --green:#128a58;
+  --wash:rgba(8,43,74,.04); --sep:rgba(8,43,74,.08); --line2:rgba(8,43,74,.28); --ph:rgba(8,43,74,.35);
+  --navbg:rgba(255,255,255,.88); --overlay:rgba(8,43,74,.35); --modal:#ffffff; --on-accent:#ffffff; --pill:#082b4a; --on-pill:#ffffff;
+  --grain:rgba(8,43,74,.05); --shadow:0 10px 32px rgba(28,73,111,.07); --a1:.07; --a2:.07; --a3:.08;
+  color-scheme:light;
+}
+html,body{background:var(--bg);color:var(--ink)}
+body{font-family:Onest,system-ui,sans-serif;min-height:100%;overflow-x:hidden;margin:0}
+.aurora{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
+.aurora i{position:absolute;border-radius:50%;opacity:.10}
+.aurora i:nth-child(1){width:46vw;height:46vw;left:-12vw;top:-14vw;background:#0e6d9c;opacity:var(--a1)}
+.aurora i:nth-child(2){width:38vw;height:38vw;right:-10vw;top:18vh;background:#b86b12;opacity:var(--a2)}
+.aurora i:nth-child(3){width:50vw;height:40vw;left:30vw;bottom:-22vw;background:#123f7a;opacity:var(--a3)}
+.grain{position:fixed;inset:0;z-index:0;pointer-events:none;background-image:radial-gradient(var(--grain) 1px,transparent 1px);background-size:22px 22px}
+.glass{background:var(--glass);border:1px solid var(--line);box-shadow:var(--shadow)}
+html,body{transition:background-color .25s ease}
+.sk{background:linear-gradient(90deg,rgba(255,255,255,.04) 0%,rgba(255,255,255,.1) 50%,rgba(255,255,255,.04) 100%);background-size:200% 100%;animation:sh 1.2s linear infinite;border-radius:10px}
+@keyframes sh{to{background-position:-200% 0}}
+html[data-tema="claro"] .sk{background-image:linear-gradient(90deg,rgba(8,43,74,.05) 0%,rgba(8,43,74,.1) 50%,rgba(8,43,74,.05) 100%)}
+.tnum{font-variant-numeric:tabular-nums}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.noscroll::-webkit-scrollbar{display:none}.noscroll{scrollbar-width:none}
+select option{background:var(--modal);color:var(--ink)}
+@media (prefers-reduced-motion:reduce){.sk{animation:none}}
+</style>
+</head><body>
+<div class="aurora"><i></i><i></i><i></i></div>
+<div class="grain"></div>
+<div id="root" class="relative z-10"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/framer-motion@11.11.17/dist/framer-motion.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/htm@3.1.1/dist/htm.umd.js"></script>
+<script>
+/* ============ NUVEM (Supabase · mesma tabela svc_shared_state do Layouts do SVC) ============ */
+const CFG_KEY="kn-painel-sb";
+const CFG_PADRAO={url:"https://cjentqthseecgizptyqe.supabase.co",key:"sb_publishable_ca35t-HrAIN5fpJk45P8FQ_10xWlHIV"};
+const TABELA="svc_shared_state", P_ESC="esc:", P_HIST="eschist:", K_ORDEM="escpainel:horarios", K_REGRAS="escpainel:regras", K_DIA="escpainel:dia:";
+function getCfg(){try{const s=JSON.parse(localStorage.getItem(CFG_KEY)||"{}")||{};return {url:s.url||CFG_PADRAO.url,key:s.key||CFG_PADRAO.key}}catch(e){return {...CFG_PADRAO}}}
+function setCfg(v){try{localStorage.setItem(CFG_KEY,JSON.stringify(v))}catch(e){}sb=null}
+function loadScript(urls){urls=[].concat(urls);return (async()=>{for(const u of urls){try{await new Promise((ok,no)=>{const s=document.createElement("script");s.src=u;s.async=true;s.onload=ok;s.onerror=()=>{s.remove();no()};document.head.appendChild(s)});if(window.supabase)return}catch(e){}}throw new Error("A biblioteca do Supabase não carregou")})()}
+let sb=null;
+async function nuvem(){
+  if(sb)return sb;
+  if(!window.supabase)await loadScript(["https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2","https://unpkg.com/@supabase/supabase-js@2"]);
+  const c=getCfg();sb=window.supabase.createClient(c.url,c.key,{realtime:{params:{eventsPerSecond:2}}});return sb;
+}
+async function lerTudo(){
+  const c=await nuvem();
+  const [e,h,o]=await Promise.all([
+    c.from(TABELA).select("state_key,payload,updated_at").like("state_key",P_ESC+"%"),
+    c.from(TABELA).select("state_key,payload,updated_at").like("state_key",P_HIST+"%").order("updated_at",{ascending:false}).limit(800),
+    c.from(TABELA).select("state_key,payload").in("state_key",[K_ORDEM,K_REGRAS])
+  ]);
+  if(e.error)throw e.error;if(h.error)throw h.error;
+  const escalas=e.data.map(r=>({...r.payload,_id:r.state_key.slice(P_ESC.length)})).sort((a,b)=>(a.ordem??999)-(b.ordem??999));
+  const historico=h.data.map(r=>({...r.payload,_id:r.state_key.slice(P_HIST.length)})).sort((a,b)=>String(b.em||"").localeCompare(String(a.em||"")));
+  const cfgs=Object.fromEntries(((o&&!o.error&&o.data)||[]).map(r=>[r.state_key,r.payload]));
+  const ordemHorarios=cfgs[K_ORDEM]&&Array.isArray(cfgs[K_ORDEM].colunas)?cfgs[K_ORDEM].colunas:null;
+  const regras=(cfgs[K_REGRAS]&&cfgs[K_REGRAS].permitido)||{};
+  return {escalas,historico,ordemHorarios,regras};
+}
+async function lerChave(k){const c=await nuvem();const {data,error}=await c.from(TABELA).select("payload").eq("state_key",k).maybeSingle();if(error)throw error;return data?data.payload:null}
+async function salvarChave(k,payload){const c=await nuvem();const {error}=await c.from(TABELA).upsert({state_key:k,payload,updated_at:new Date().toISOString()},{onConflict:"state_key"});if(error)throw error}
+async function salvarOrdemHorarios(colunas){
+  const c=await nuvem();const agora=new Date().toISOString();
+  const {error}=await c.from(TABELA).upsert({state_key:K_ORDEM,payload:{colunas,em:agora},updated_at:agora},{onConflict:"state_key"});
+  if(error)throw error;
+}
+/* altera uma escala partindo sempre da versão mais nova da nuvem; se outra pessoa salvou no meio, tenta de novo */
+async function alterarEscala(id,fn){
+  const c=await nuvem();const key=P_ESC+id;
+  for(let t=0;t<4;t++){
+    const {data,error}=await c.from(TABELA).select("payload,updated_at").eq("state_key",key).maybeSingle();
+    if(error)throw error;if(!data)throw new Error("Essa escala não existe mais na nuvem");
+    const novo=fn(JSON.parse(JSON.stringify(data.payload)));const agora=new Date().toISOString();
+    const r=await c.from(TABELA).update({payload:novo,updated_at:agora}).eq("state_key",key).eq("updated_at",data.updated_at).select("state_key");
+    if(r.error)throw r.error;if(r.data&&r.data.length)return novo;
+    await new Promise(ok=>setTimeout(ok,250+Math.random()*400));
+  }
+  throw new Error("Outra pessoa está mexendo nessa escala agora. Tente de novo.");
+}
+async function registrar(ev){
+  const c=await nuvem();const agora=new Date().toISOString();
+  const id=agora.replace(/[^0-9]/g,"")+"-"+Math.random().toString(36).slice(2,7);
+  const {error}=await c.from(TABELA).insert({state_key:P_HIST+id,payload:{em:agora,...ev},updated_at:agora});
+  if(error)throw error;
+}
+async function importarBackup(dados){
+  const c=await nuvem();const agora=new Date().toISOString();
+  const linhas=Object.entries(dados.escalas||{}).map(([id,p])=>({state_key:P_ESC+id,payload:p,updated_at:agora}));
+  (dados.historico||[]).forEach(h=>{const {id,...resto}=h;linhas.push({state_key:P_HIST+id,payload:resto,updated_at:resto.em||agora})});
+  for(let i=0;i<linhas.length;i+=40){const {error}=await c.from(TABELA).upsert(linhas.slice(i,i+40),{onConflict:"state_key"});if(error)throw error}
+  return linhas.length;
+}
+
+/* ============ COBERTURA EM CADEIA ============
+   nos: [{id, nome, hora(num), presentes:[{id,nome}], ausentes:[{id,nome}], precisa}]
+   extras: [{id, nome, horas:[num]}]
+   pode(o,d): a pessoa da hora o pode bater ponto na hora d
+   Resolve por fluxo de custo mínimo: cobre o máximo de furos com o menor número de movimentações. */
+function resolverCobertura(nos,extras,pode){
+  const N=[];const add=()=>N.push([])-1;
+  const S=add(),T=add();const E=[];
+  const aresta=(u,v,cap,custo,info)=>{const a={u,v,cap,custo,flow:0,info,rev:null};const b={u:v,v:u,cap:0,custo:-custo,flow:0,info:null,rev:a};a.rev=b;N[u].push(a);N[v].push(b);E.push(a);return a};
+  const idx={};
+  nos.forEach(n=>{idx[n.id]={ent:add(),sai:add()}});
+  nos.forEach(n=>{const p=n.presentes.length,b=p-n.precisa,k=idx[n.id];
+    if(b>0)aresta(S,k.sai,b,0,{tipo:"sobra",no:n.id});
+    if(b<0)aresta(k.ent,T,-b,0,{tipo:"furo",no:n.id});
+    const passa=p-Math.max(0,b);if(passa>0)aresta(k.ent,k.sai,passa,0,{tipo:"passa",no:n.id});
+  });
+  const custoMov=(o,d)=>1000+10*Math.abs(o-d);
+  nos.forEach(a=>nos.forEach(b=>{if(a.id!==b.id&&pode(a.hora,b.hora))aresta(idx[a.id].sai,idx[b.id].ent,1e9,custoMov(a.hora,b.hora),{tipo:"mov",de:a.id,para:b.id})}));
+  extras.forEach(x=>{const xn=add();aresta(S,xn,1,0,{tipo:"extra",x:x.id});
+    nos.forEach(b=>{if((x.horas||[]).includes(b.hora))aresta(xn,idx[b.id].ent,1,custoMov(x.hora??b.hora,b.hora)+1,{tipo:"movx",x:x.id,para:b.id})})});
+  /* caminhos mais baratos sucessivos (Bellman-Ford; o grafo é pequeno) */
+  for(;;){
+    const dist=new Array(N.length).fill(Infinity),pre=new Array(N.length).fill(null);dist[S]=0;
+    for(let it=0;it<N.length;it++){let mudou=false;
+      for(let u=0;u<N.length;u++){if(dist[u]===Infinity)continue;
+        for(const e of N[u]){if(e.cap-e.flow>0&&dist[u]+e.custo<dist[e.v]){dist[e.v]=dist[u]+e.custo;pre[e.v]=e;mudou=true}}}
+      if(!mudou)break}
+    if(dist[T]===Infinity)break;
+    let f=Infinity;for(let v=T;v!==S;v=pre[v].u)f=Math.min(f,pre[v].cap-pre[v].flow);
+    for(let v=T;v!==S;v=pre[v].u){pre[v].flow+=f;pre[v].rev.flow-=f}
+  }
+  /* desmonta o fluxo em cadeias, do furo até quem fecha a cadeia */
+  const resto=new Map();E.forEach(e=>resto.set(e,Math.max(0,e.flow)));
+  const entram=v=>E.filter(e=>e.v===v&&resto.get(e)>0);
+  const byId=Object.fromEntries(nos.map(n=>[n.id,n]));const exById=Object.fromEntries(extras.map(x=>[x.id,x]));
+  const usados=new Set(),rotAus={};nos.forEach(n=>rotAus[n.id]=0);
+  const pegaPessoa=no=>{const p=byId[no].presentes.find(x=>!usados.has(x.id));if(p)usados.add(p.id);return p||{id:"?",nome:"(alguém da escala)"}};
+  const cadeias=[];
+  E.filter(e=>e.info&&e.info.tipo==="furo").forEach(ef=>{
+    for(let k=0;k<resto.get(ef);k++){
+      const dno=ef.info.no;const j=rotAus[dno]++;const mot=(byId[dno].motivos||[])[j]||null;
+      const passos=[];let v=idx[dno].ent;let fechou=null;
+      for(let guard=0;guard<200;guard++){
+        const e=entram(v)[0];if(!e)break;resto.set(e,resto.get(e)-1);
+        if(e.info.tipo==="mov"){const quem=pegaPessoa(e.info.de);passos.push({pessoa:quem,de:e.info.de,para:e.info.para});v=idx[e.info.de].sai;continue}
+        if(e.info.tipo==="movx"){const x=exById[e.info.x];usados.add(x.id);passos.push({pessoa:{id:x.id,nome:x.nome},extra:true,origem:x.origem||"extra",hora:x.hora,para:e.info.para});const ex=entram(e.u)[0];if(ex)resto.set(ex,resto.get(ex)-1);fechou="extra";break}
+        if(e.info.tipo==="passa"){v=e.u;continue}
+        if(e.info.tipo==="sobra"){fechou="sobra";passos.length&&(passos[passos.length-1].excedente=true);break}
+      }
+      if(fechou)cadeias.push({furo:{no:dno,mot},passos});
+    }
+  });
+  const furos=nos.reduce((s,n)=>s+Math.max(0,n.precisa-n.presentes.length),0);
+  const cobertos=cadeias.length;
+  const semCobertura=nos.map(n=>({no:n.id,faltam:Math.max(0,n.precisa-n.presentes.length)-cadeias.filter(c=>c.furo.no===n.id).length,motivos:(n.motivos||[]).slice(rotAus[n.id],Math.max(0,n.precisa-n.presentes.length))})).filter(x=>x.faltam>0);
+  const movs=cadeias.reduce((s,c)=>s+c.passos.length,0);
+  return {cadeias,furos,cobertos,semCobertura,movs};
+}
+
+
+/* ============ REGRAS ============ */
+const MOTIVOS_SAIDA=["Demissão","Mudança de cargo","INSS","Pediu desligamento","Desistiu","Afastamento","Férias","Outro"];
+const TOM={"Demissão":"red","Pediu desligamento":"red","Desistiu":"red","INSS":"amber","Afastamento":"amber","Férias":"amber","Mudou de escala":"accent","Mudança de cargo":"amber","Adicionado":"accent","Adicionado em lote":"accent","Restaurado":"green","Renomeada":"accent"};
+const norm=s=>(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase();
+const soDig=s=>(s||"").replace(/\D/g,"");
+const fmtCpf=s=>{const d=soDig(s);return d.length===11?d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/,"$1.$2.$3-$4"):(s||"").trim()};
+function cpfValido(c){if(c.length!==11||/^(\d)\1{10}$/.test(c))return false;for(const k of [9,10]){let s=0;for(let i=0;i<k;i++)s+=+c[i]*(k+1-i);if(((s*10)%11)%10!==+c[k])return false}return true}
+const novoId=()=>"p"+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+const previstoDe=g=>typeof g.previsto==="number"?g.previsto:(g.pessoas||[]).length;
+function situacao(n,p){return n<p?{tom:"red",txt:`faltam ${p-n}`}:n>p?{tom:"amber",txt:`${n-p} a mais`}:{tom:"green",txt:"completo"}}
+const corTom=t=>({red:"var(--red)",amber:"var(--amber)",green:"var(--green)",accent:"var(--accent)"}[t]||"var(--muted)");
+const fundoTom=t=>({red:"color-mix(in srgb,var(--red) 13%,transparent)",amber:"color-mix(in srgb,var(--amber) 13%,transparent)",green:"color-mix(in srgb,var(--green) 12%,transparent)",accent:"color-mix(in srgb,var(--accent) 13%,transparent)"}[t]||"var(--wash)");
+const CPF_RE=/(\d{3})[.\s]?(\d{3})[.\s]?(\d{3})[-.\s]?(\d{2})(?!\d)/;
+function lerLista(texto,escalas){
+  const existentes=new Map();escalas.forEach(g=>(g.pessoas||[]).forEach(p=>{const d=soDig(p.cpf);if(d)existentes.set(d,g.code)}));
+  const vistos=new Set(),out=[];
+  texto.split(/\r?\n/).forEach(raw=>{
+    const l=raw.trim();if(!l)return;
+    if(/^(nome|name)\b/i.test(l)&&!/\d/.test(l))return;
+    const m=l.match(CPF_RE);let d="",nome=l;
+    if(m){d=m.slice(1,5).join("");nome=l.replace(m[0]," ")}
+    nome=nome.replace(/^\s*\d{1,3}\s*[-.)–]\s+/,"").replace(/[\t;|,]+/g," ").replace(/\s[-–]\s/g," ").replace(/\s+/g," ").trim().replace(/^[-–:]+|[-–:]+$/g,"").trim();
+    const it={nome,cpf:d?fmtCpf(d):"",ok:true,erro:"",aviso:""};
+    if(!nome){it.ok=false;it.erro="Sem nome nesta linha"}
+    else if(d&&!cpfValido(d)){it.ok=false;it.erro="CPF inválido, confira os números"}
+    else if(d&&existentes.has(d)){it.ok=false;it.erro=`Esse CPF já está em ${existentes.get(d)}`}
+    else if(d&&vistos.has(d)){it.ok=false;it.erro="CPF repetido na lista colada"}
+    else if(!d)it.aviso="Sem CPF, dá para completar depois em Editar";
+    if(d)vistos.add(d);out.push(it);
+  });
+  return out;
+}
+
+/* ============ UI ============ */
+const {useState,useEffect,useRef,useMemo,useCallback}=React;
+const {motion,AnimatePresence,LayoutGroup}=Motion;
+const html=htm.bind(React.createElement);
+const spring={type:"spring",stiffness:420,damping:32};
+const abrir={initial:{height:0,opacity:0},animate:{height:"auto",opacity:1},exit:{height:0,opacity:0},transition:{duration:.22,ease:[.22,1,.36,1]}};
+
+function CountUp({v}){const [n,setN]=useState(0);useEffect(()=>{const c=Motion.animate(0,v,{duration:1.1,ease:[.22,1,.36,1],onUpdate:x=>setN(Math.round(x))});return()=>c.stop()},[v]);return n.toLocaleString("pt-BR")}
+
+function Card({className="",children,title,right}){
+  return html`<section class=${"glass rounded-3xl p-5 sm:p-6 min-w-0 "+className}>
+    ${title&&html`<div class="flex items-center justify-between gap-3 mb-4 flex-wrap"><h2 class="text-[11px] uppercase tracking-[.16em] text-muted font-semibold">${title}</h2>${right}</div>`}
+    ${children}
+  </section>`;
+}
+const Pill=({tom,children,title})=>html`<span title=${title} class="inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap" style=${{background:fundoTom(tom),color:corTom(tom)}}>${children}</span>`;
+const BtnMini=({onClick,children,perigo,disabled,label})=>html`<button type="button" disabled=${disabled} aria-label=${label} onClick=${onClick}
+  class=${"text-[12px] font-medium px-2.5 py-1 rounded-full border transition-colors disabled:opacity-40 "+(perigo?"border-[color-mix(in srgb,var(--red) 35%,transparent)] text-[var(--red)] hover:bg-[color-mix(in srgb,var(--red) 12%,transparent)]":"border-line text-muted hover:text-ink hover:border-[var(--line2)]")}>${children}</button>`;
+const BtnPrim=({onClick,children,disabled,perigo})=>html`<button type="button" disabled=${disabled} onClick=${onClick}
+  class="text-[13px] font-semibold px-4 py-2 rounded-full disabled:opacity-40" style=${{background:perigo?"var(--red)":"var(--accent)",color:"var(--on-accent)"}}>${children}</button>`;
+const BtnSec=({onClick,children,disabled})=>html`<button type="button" disabled=${disabled} onClick=${onClick} class="text-[13px] font-medium px-4 py-2 rounded-full border border-line text-ink hover:border-[var(--line2)] disabled:opacity-40">${children}</button>`;
+const campo="w-full bg-[var(--wash)] border border-line rounded-2xl px-3.5 py-2.5 text-[14px] outline-none focus:border-[var(--accent)] transition-colors placeholder:text-[var(--ph)]";
+
+function Nav({view,setView,status,onSync,onCfg,tema,setTema}){
+  const tabs=[["escalas","Escalas"],["antigas",html`<span class="sm:hidden">Antigas</span><span class="hidden sm:inline">Escalas antigas</span>`],["cobertura","Cobertura"],["historico","Histórico"]];
+  const st=status.ok===null?{c:"#64748b",t:"conectando…"}:!status.ok?{c:"#dc2626",t:"sem nuvem"}:status.busy?{c:"#d97706",t:"salvando…"}:{c:"#16a34a",t:"ao vivo · "+status.at};
+  return html`<header class="fixed top-0 inset-x-0 z-50" style=${{paddingTop:"env(safe-area-inset-top,0px)"}}>
+    <div class="glass !border-x-0 !border-t-0" style=${{background:"var(--navbg)"}}>
+      <nav class="max-w-7xl mx-auto px-4 h-14 flex items-center gap-3">
+        <div class="flex items-center gap-2 shrink-0">
+          <span class="w-2 h-2 rounded-full" style=${{background:"var(--accent)",boxShadow:"0 0 12px var(--accent)"}}></span>
+          <span class="font-display text-[13px] tracking-tight">KN<span class="text-muted font-sans font-medium hidden sm:inline"> · Painel</span></span>
+        </div>
+        <button type="button" onClick=${onSync} title="Sincronizar agora" class="hidden sm:inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full text-white" style=${{background:st.c}}>● ${st.t}</button>
+        <${LayoutGroup} id="tabs">
+          <div class="ml-auto flex gap-1 overflow-x-auto noscroll p-1 rounded-full" style=${{background:"var(--wash)"}} role="tablist">
+            ${tabs.map(([k,t])=>html`<button key=${k} id=${"tab-"+k} role="tab" type="button" aria-selected=${k===view} onClick=${()=>setView(k)}
+              class=${"relative shrink-0 px-2.5 sm:px-4 py-1.5 rounded-full text-[12.5px] sm:text-[13px] font-medium transition-colors "+(k===view?"text-[var(--on-pill)]":"text-muted hover:text-ink")}>
+              ${k===view&&html`<${motion.span} layoutId="pill" class="absolute inset-0 rounded-full" style=${{background:"var(--pill)"}} transition=${spring}/>`}
+              <span class="relative">${t}</span></button>`)}
+          </div>
+        </${LayoutGroup}>
+        <button type="button" onClick=${()=>setTema(tema==="claro"?"escuro":"claro")} aria-label=${tema==="claro"?"Usar versão escura":"Usar versão clara"} title=${tema==="claro"?"Versão escura":"Versão clara"} class="shrink-0 w-9 h-9 rounded-full text-muted hover:text-ink" style=${{background:"var(--wash)"}}>${tema==="claro"?"☾":"☀"}</button>
+        <button type="button" onClick=${onCfg} aria-label="Configurações" title="Configurações e backup" class="shrink-0 w-9 h-9 rounded-full text-muted hover:text-ink" style=${{background:"var(--wash)"}}>⚙</button>
+      </nav>
+    </div>
+  </header>`;
+}
+
+function Stepper({g,podeEditar,onSalvar}){
+  const real=previstoDe(g);const [v,setV]=useState(null);const tm=useRef(null);const base=useRef(real);
+  useEffect(()=>{if(v===null)base.current=real},[real,v]);
+  const mudar=d=>{const novo=Math.max(0,(v??real)+d);setV(novo);clearTimeout(tm.current);
+    tm.current=setTimeout(async()=>{const antes=base.current;if(novo!==antes){await onSalvar(antes,novo)}setV(null)},900)};
+  const atual=v??real;const s=situacao((g.pessoas||[]).length,atual);
+  return html`<div class="flex items-center gap-3 flex-wrap text-[13px] text-muted">
+    <span>Quantidade prevista</span>
+    ${podeEditar?html`<span class="inline-flex items-center rounded-full border border-line overflow-hidden" style=${{background:"var(--wash)"}}>
+      <button type="button" aria-label=${"Diminuir quantidade de "+g.code} disabled=${atual<=0} onClick=${()=>mudar(-1)} class="w-9 h-8 text-lg font-bold disabled:opacity-30" style=${{color:"var(--accent)"}}>−</button>
+      <output class="min-w-[40px] text-center font-mono text-[15px] text-ink tnum">${atual}</output>
+      <button type="button" aria-label=${"Aumentar quantidade de "+g.code} onClick=${()=>mudar(1)} class="w-9 h-8 text-lg font-bold" style=${{color:"var(--accent)"}}>+</button>
+    </span>`:html`<b class="text-ink tnum">${atual}</b>`}
+    <${Pill} tom=${s.tom}>${s.txt}</${Pill}>
+  </div>`;
+}
+
+function FormPessoa({inicial,escalas,novo,onCancelar,onSalvar}){
+  const [f,setF]=useState(inicial);const [busy,setBusy]=useState(false);const ref=useRef(null);
+  useEffect(()=>{ref.current&&ref.current.focus()},[]);
+  const set=k=>e=>setF({...f,[k]:e.target.value});
+  const salvar=async()=>{setBusy(true);try{await onSalvar(f)}finally{setBusy(false)}};
+  return html`<div class="rounded-2xl p-3.5 my-2 border" style=${{background:"color-mix(in srgb,var(--accent) 6%,transparent)",borderColor:"color-mix(in srgb,var(--accent) 25%,transparent)"}} onKeyDown=${e=>{if(e.key==="Escape")onCancelar()}}>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+      <label class="sm:col-span-2 text-[11px] text-muted grid gap-1">Nome<input ref=${ref} id="f-nome" class=${campo} value=${f.nome} onInput=${set("nome")} autocomplete="off"/></label>
+      <label class="text-[11px] text-muted grid gap-1">CPF<input id="f-cpf" class=${campo+" font-mono"} inputmode="numeric" value=${f.cpf} onInput=${set("cpf")} autocomplete="off"/></label>
+      <label class="text-[11px] text-muted grid gap-1">Escala<select id="f-destino" class=${campo} value=${f.destino} onChange=${set("destino")}>${escalas.map(g=>html`<option key=${g._id} value=${g._id}>${g.code}</option>`)}</select></label>
+      <label class="sm:col-span-2 text-[11px] text-muted grid gap-1">Observação<input id="f-obs" class=${campo} value=${f.obs} onInput=${set("obs")} placeholder="Opcional" autocomplete="off"/></label>
+      <label class="sm:col-span-2 text-[11px] text-muted grid gap-1">Motivo da mudança (vai para o Histórico)<input id="f-motivo" class=${campo} value=${f.motivo} onInput=${set("motivo")} placeholder="Ex.: troca de turno a pedido do coordenador" autocomplete="off"/></label>
+    </div>
+    <div class="flex justify-end gap-2 mt-3 flex-wrap"><${BtnSec} onClick=${onCancelar}>Cancelar</${BtnSec}><${BtnPrim} disabled=${busy} onClick=${salvar}>${busy?"Salvando…":novo?"Adicionar":"Salvar"}</${BtnPrim}></div>
+  </div>`;
+}
+
+function ConfirmaSaida({p,g,onCancelar,onConfirmar}){
+  const [motivo,setMotivo]=useState("");const [nota,setNota]=useState("");const [busy,setBusy]=useState(false);const [erro,setErro]=useState("");
+  const ir=async()=>{if(!motivo){setErro("Escolha o motivo antes de tirar a pessoa.");return}setBusy(true);try{await onConfirmar(motivo,nota.trim())}finally{setBusy(false)}};
+  return html`<div class="rounded-2xl p-3.5 my-2 border" style=${{background:"color-mix(in srgb,var(--red) 7%,transparent)",borderColor:"color-mix(in srgb,var(--red) 30%,transparent)"}}>
+    <div class="text-[14px] font-medium">Tirar ${p.nome} de ${g.code}?</div>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2.5">
+      <select id="x-motivo" aria-label="Motivo" class=${campo} value=${motivo} onChange=${e=>{setMotivo(e.target.value);setErro("")}}><option value="">Escolha o motivo…</option>${MOTIVOS_SAIDA.map(m=>html`<option key=${m} value=${m}>${m}</option>`)}</select>
+      <input id="x-nota" class=${campo} placeholder="Observação (opcional)" value=${nota} onInput=${e=>setNota(e.target.value)} autocomplete="off"/>
+    </div>
+    ${erro&&html`<div class="text-[12px] mt-2" style=${{color:"var(--red)"}}>${erro}</div>`}
+    <div class="flex justify-end gap-2 mt-3 flex-wrap"><${BtnSec} onClick=${onCancelar}>Cancelar</${BtnSec}><${BtnPrim} perigo disabled=${busy} onClick=${ir}>${busy?"Tirando…":"Tirar da escala"}</${BtnPrim}></div>
+  </div>`;
+}
+
+function ColarLista({g,escalas,onCancelar,onAdicionar}){
+  const [t,setT]=useState("");const [busy,setBusy]=useState(false);const ref=useRef(null);
+  useEffect(()=>{ref.current&&ref.current.focus()},[]);
+  const itens=useMemo(()=>lerLista(t,escalas),[t,escalas]);const ok=itens.filter(i=>i.ok);
+  const ir=async()=>{setBusy(true);try{await onAdicionar(ok)}finally{setBusy(false)}};
+  return html`<div class="rounded-2xl p-3.5 mt-3 border grid gap-3" style=${{background:"color-mix(in srgb,var(--accent) 6%,transparent)",borderColor:"color-mix(in srgb,var(--accent) 25%,transparent)"}}>
+    <label for="c-texto" class="font-display text-[12px] tracking-wide">Colar nomes e CPFs em ${g.code}</label>
+    <textarea ref=${ref} id="c-texto" value=${t} onInput=${e=>setT(e.target.value)} rows="6" class=${campo+" font-mono text-[13px] resize-y"}
+      placeholder=${"Maria da Silva\t123.456.789-09\nJoão Souza;98765432100\n111.444.777-35 - Ana Lima"}></textarea>
+    ${itens.length?html`<div class="text-[12px] text-muted"><b class="text-ink">${ok.length}</b> pronta(s) para adicionar${itens.length-ok.length?html` · <span style=${{color:"var(--red)"}}>${itens.length-ok.length} com problema (não entram)</span>`:""}</div>
+      <div class="rounded-2xl border border-line overflow-y-auto max-h-64" style=${{background:"var(--wash)"}}>
+        ${itens.map((i,n)=>html`<div key=${n} class="grid grid-cols-[1fr_auto] gap-x-3 px-3 py-2 border-t border-[var(--sep)] first:border-t-0 text-[13px]">
+          <span class="min-w-0 truncate">${i.nome||"—"}</span><span class="font-mono text-muted">${i.cpf||"sem CPF"}</span>
+          ${i.erro&&html`<span class="col-span-2 text-[11px]" style=${{color:"var(--red)"}}>${i.erro}</span>`}
+          ${i.aviso&&html`<span class="col-span-2 text-[11px]" style=${{color:"var(--amber)"}}>${i.aviso}</span>`}
+        </div>`)}
+      </div>`:html`<div class="text-[12px] text-muted">Uma pessoa por linha, com nome e CPF em qualquer ordem. Pode copiar direto do Excel ou do Sheets.</div>`}
+    <div class="flex justify-end gap-2 flex-wrap"><${BtnSec} onClick=${onCancelar}>Cancelar</${BtnSec}><${BtnPrim} disabled=${busy||!ok.length} onClick=${ir}>${busy?"Adicionando…":`Adicionar ${ok.length||""} em ${g.code}`}</${BtnPrim}></div>
+  </div>`;
+}
+
+function Pessoa({p,i,g,escalas,acao,setAcao,podeEditar,ops}){
+  const [copiado,setCopiado]=useState(false);
+  const copiar=async()=>{try{await navigator.clipboard.writeText(p.cpf);setCopiado(true);setTimeout(()=>setCopiado(false),1300)}catch(e){}};
+  if(acao&&acao.tipo==="editar"&&acao.id===p.id)return html`<${FormPessoa} inicial=${{nome:p.nome,cpf:p.cpf,obs:p.obs||"",destino:g._id,motivo:""}} escalas=${escalas}
+    onCancelar=${()=>setAcao(null)} onSalvar=${f=>ops.salvarPessoa(g,p,f)}/>`;
+  if(acao&&acao.tipo==="sair"&&acao.id===p.id)return html`<${ConfirmaSaida} p=${p} g=${g} onCancelar=${()=>setAcao(null)} onConfirmar=${(m,n)=>ops.tirar(g,p,m,n)}/>`;
+  return html`<div class="flex items-center gap-3 py-2.5 border-t border-[var(--sep)] first:border-t-0 flex-wrap sm:flex-nowrap">
+    <span class="font-mono text-[11px] text-muted tnum w-6 shrink-0">${String(i+1).padStart(2,"0")}</span>
+    <div class="min-w-0 flex-1">
+      <div class="text-[14px] font-medium break-words">${p.nome}${p.obs&&html` <span class="inline-block align-middle ml-1"><${Pill} tom="amber">${p.obs}</${Pill}></span>`}</div>
+      <div class="font-mono text-[12px] text-muted tnum mt-0.5">${p.cpf||"sem CPF"}</div>
+    </div>
+    <div class="flex gap-1.5 flex-wrap pl-9 sm:pl-0">
+      ${p.cpf&&html`<${BtnMini} onClick=${copiar}>${copiado?"Copiado":"Copiar CPF"}</${BtnMini}>`}
+      ${podeEditar&&html`<${BtnMini} onClick=${()=>setAcao({tipo:"editar",id:p.id})}>Editar</${BtnMini}><${BtnMini} perigo onClick=${()=>setAcao({tipo:"sair",id:p.id})}>Excluir</${BtnMini}>`}
+    </div>
+  </div>`;
+}
+
+function Renomear({g,podeEditar,onSalvar}){
+  const [ed,setEd]=useState(false);const [v,setV]=useState(g.code);const [busy,setBusy]=useState(false);
+  if(!podeEditar)return null;
+  if(!ed)return html`<div class="mb-2"><${BtnMini} onClick=${()=>{setV(g.code);setEd(true)}}>✎ Renomear escala</${BtnMini}></div>`;
+  const ir=async()=>{setBusy(true);const ok=await onSalvar(v.trim());setBusy(false);if(ok)setEd(false)};
+  return html`<div class="flex gap-2 items-center flex-wrap mb-3">
+    <label for=${"ren-"+g._id} class="text-[12px] text-muted">Nome da escala</label>
+    <input id=${"ren-"+g._id} class=${campo+" !w-40 font-display"} value=${v} onInput=${e=>setV(e.target.value)} onKeyDown=${e=>{if(e.key==="Enter")ir();if(e.key==="Escape")setEd(false)}} autocomplete="off"/>
+    <${BtnSec} onClick=${()=>setEd(false)}>Cancelar</${BtnSec}><${BtnPrim} disabled=${busy} onClick=${ir}>${busy?"Salvando…":"Salvar"}</${BtnPrim}>
+  </div>`;
+}
+function Escala({g,escalas,aberta,toggle,filtro,acao,setAcao,podeEditar,ops}){
+  const f=norm(filtro.trim()),fd=soDig(filtro);const ps=g.pessoas||[];
+  const hitCode=f&&norm(g.code).includes(f);
+  const itens=(!f||hitCode)?ps:ps.filter(p=>norm(p.nome).includes(f)||(fd.length>=3&&soDig(p.cpf).includes(fd)));
+  const minha=acao&&acao.escala===g._id;
+  if(f&&!itens.length&&!minha)return null;
+  const open=aberta||!!f||minha;
+  const sub=g.tipo==="cargo"?(ps.length?"Liderança e apoio":"Liderança e apoio · ainda sem nomes"):(g.turno||"Turno não informado");
+  return html`<div id=${"esc-"+g._id} class="rounded-2xl border border-line overflow-hidden scroll-mt-28" style=${{background:"var(--wash)"}}>
+    <button type="button" onClick=${toggle} aria-expanded=${open?"true":"false"} class="w-full flex items-center gap-3 px-4 py-3.5 text-left hover:bg-[var(--wash)] transition-colors">
+      <${motion.span} animate=${{rotate:open?90:0}} transition=${spring} class="w-6 h-6 rounded-lg grid place-items-center text-[10px] shrink-0" style=${{background:"color-mix(in srgb,var(--accent) 13%,transparent)",color:"var(--accent)"}}>▶</${motion.span}>
+      <span class="min-w-0 flex-1"><span class="block font-display text-[16px] tracking-tight tnum">${g.code}</span><span class="block text-[12px] text-muted mt-0.5 truncate">${sub}</span></span>
+      <span class="font-mono text-[12px] px-2.5 py-1 rounded-full tnum shrink-0" style=${{background:"color-mix(in srgb,var(--accent) 12%,transparent)",color:"var(--accent)"}}>${f&&itens.length!==ps.length?itens.length+" de ":""}${ps.length} ${ps.length===1?"pessoa":"pessoas"}</span>
+    </button>
+    <${AnimatePresence} initial=${false}>${open&&html`<${motion.div} key="b" ...${abrir} class="overflow-hidden">
+      <div class="px-4 pb-4">
+        <${Renomear} g=${g} podeEditar=${podeEditar} onSalvar=${n=>ops.renomear(g,n)}/>
+        ${(g.coords||[]).length>0&&html`<div class="text-[12px] text-muted mb-2">Coord.: ${g.coords.join(", ")}</div>`}
+        <div class="mb-2"><${Stepper} g=${g} podeEditar=${podeEditar} onSalvar=${(a,n)=>ops.previsto(g,a,n)}/></div>
+        <div>${itens.map((p,i)=>html`<${Pessoa} key=${p.id} p=${p} i=${i} g=${g} escalas=${escalas} acao=${acao} setAcao=${setAcao} podeEditar=${podeEditar} ops=${ops}/>`)}</div>
+        ${!ps.length&&html`<div class="text-[13px] text-muted py-2">Ninguém nessa escala ainda.</div>`}
+        ${minha&&acao.tipo==="novo"&&html`<${FormPessoa} novo inicial=${{nome:"",cpf:"",obs:"",destino:g._id,motivo:""}} escalas=${escalas} onCancelar=${()=>setAcao(null)} onSalvar=${f=>ops.salvarPessoa(g,null,f)}/>`}
+        ${minha&&acao.tipo==="colar"&&html`<${ColarLista} g=${g} escalas=${escalas} onCancelar=${()=>setAcao(null)} onAdicionar=${it=>ops.colar(g,it)}/>`}
+        ${podeEditar&&!(minha&&(acao.tipo==="novo"||acao.tipo==="colar"))&&html`<div class="flex gap-2 flex-wrap mt-3">
+          <${BtnMini} onClick=${()=>setAcao({tipo:"novo",escala:g._id})}>+ Adicionar pessoa</${BtnMini}>
+          <${BtnMini} onClick=${()=>setAcao({tipo:"colar",escala:g._id})}>Colar lista de nome e CPF</${BtnMini}>
+        </div>`}
+      </div>
+    </${motion.div}>`}</${AnimatePresence}>
+  </div>`;
+}
+
+function Totais({escalas}){
+  const ops=escalas.filter(g=>g.tipo!=="cargo"),car=escalas.filter(g=>g.tipo==="cargo");
+  const n=a=>a.reduce((s,g)=>s+(g.pessoas||[]).length,0),p=a=>a.reduce((s,g)=>s+previstoDe(g),0);
+  const nt=n(escalas),pt=p(escalas),s=situacao(nt,pt);
+  const mini=(rot,a)=>{const x=n(a),y=p(a),z=situacao(x,y);return html`<div class="min-w-0"><div class="font-display text-2xl sm:text-3xl tnum"><${CountUp} v=${x}/><span class="text-muted font-sans text-sm"> de ${y}</span></div><div class="text-muted text-xs mt-1">${rot}</div><div class="text-[11px] mt-0.5" style=${{color:corTom(z.tom)}}>${z.txt}</div></div>`};
+  return html`<${Card} className="md:col-span-8">
+    <div class="text-[11px] uppercase tracking-[.16em] text-muted font-semibold">Headcount KN 2026 · Rostering</div>
+    <div class="flex items-end gap-4 flex-wrap mt-2 mb-6">
+      <h1 class="font-display text-5xl sm:text-7xl tracking-tight tnum leading-none"><${CountUp} v=${nt}/></h1>
+      <div class="pb-1"><div class="text-[15px]">pessoas em todas as escalas</div><div class="text-[13px]"><span class="text-muted">previsto ${pt} · </span><span style=${{color:corTom(s.tom)}}>${s.txt}</span></div></div>
+    </div>
+    <div class="grid grid-cols-2 gap-4 max-w-md">
+      ${mini(`Escalas operacionais · ${ops.length}`,ops)}
+      ${car.length>0&&mini(`Liderança e apoio · ${car.length}`,car)}
+    </div>
+  </${Card}>`;
+}
+
+function Busca({filtro,setFiltro,onAbrir,onFechar,achados}){
+  return html`<${Card} className="md:col-span-4" title="Buscar">
+    <label for="busca" class="sr-only">Escala, nome ou CPF</label>
+    <input id="busca" type="search" value=${filtro} onInput=${e=>setFiltro(e.target.value)} placeholder="Escala, nome ou CPF" autocomplete="off"
+      class="w-full bg-[var(--wash)] border border-line rounded-2xl px-4 py-3 font-display text-lg placeholder:text-[var(--ph)] outline-none focus:border-[var(--accent)] transition-colors"/>
+    <div class="text-[12px] text-muted mt-3 min-h-[18px]">${filtro.trim()?(achados?`${achados} pessoa(s) encontrada(s)`:"Ninguém encontrado"):"Digite parte do nome, o código da escala ou o CPF."}</div>
+    <div class="flex gap-2 mt-3 flex-wrap"><${BtnMini} onClick=${onAbrir}>Abrir todas</${BtnMini}><${BtnMini} onClick=${onFechar}>Fechar todas</${BtnMini}></div>
+  </${Card}>`;
+}
+
+function EscalasView({escalas,podeEditar,ops,carregando,onCfg,foco}){
+  const [filtro,setFiltro]=useState("");const [abertas,setAbertas]=useState(()=>new Set(foco?[foco.id]:[]));
+  useEffect(()=>{if(!foco||carregando)return;setAbertas(s=>new Set(s).add(foco.id));const t=setTimeout(()=>{const el=document.getElementById("esc-"+foco.id);el&&el.scrollIntoView({behavior:"smooth",block:"start"})},350);return()=>clearTimeout(t)},[foco,carregando]);const [acao,setAcaoRaw]=useState(null);
+  const setAcao=a=>{setAcaoRaw(a);if(a&&a.escala)setAbertas(s=>new Set(s).add(a.escala))};
+  const opsComFim={...ops};["salvarPessoa","tirar","colar"].forEach(k=>opsComFim[k]=async(...a)=>{const ok=await ops[k](...a);if(ok)setAcaoRaw(null)});
+  const toggle=id=>setAbertas(s=>{const n=new Set(s);n.has(id)?n.delete(id):n.add(id);return n});
+  const f=norm(filtro.trim()),fd=soDig(filtro);
+  const achados=f?escalas.reduce((s,g)=>s+(g.pessoas||[]).filter(p=>norm(g.code).includes(f)||norm(p.nome).includes(f)||(fd.length>=3&&soDig(p.cpf).includes(fd))).length,0):0;
+  if(carregando)return html`<div class="grid grid-cols-1 md:grid-cols-12 gap-4">
+    <div class="glass rounded-3xl p-6 md:col-span-8 h-48"><div class="sk h-3 w-24 mb-5"></div><div class="sk h-12 w-1/3 mb-3"></div><div class="sk h-3 w-1/2"></div></div>
+    <div class="glass rounded-3xl p-6 md:col-span-4 h-48"><div class="sk h-3 w-20 mb-5"></div><div class="sk h-12 w-full"></div></div>
+    <div class="glass rounded-3xl p-6 md:col-span-12">${[1,2,3,4,5].map(i=>html`<div key=${i} class="sk h-14 w-full mb-2"></div>`)}</div></div>`;
+  if(!escalas.length)return html`<${Card} title="Escalas"><div class="text-[15px] max-w-xl">Ainda não tem nenhuma escala na nuvem. Abra <b>⚙ Configurações</b> e importe o arquivo <span class="font-mono text-[13px]">escalas-dados-iniciais.json</span> para carregar as escalas, as pessoas e o histórico.</div><div class="mt-4"><${BtnPrim} onClick=${onCfg}>Abrir Configurações</${BtnPrim}></div></${Card}>`;
+  const ops_=escalas.filter(g=>g.tipo!=="cargo"),car=escalas.filter(g=>g.tipo==="cargo");
+  const soma=a=>`${a.reduce((s,g)=>s+(g.pessoas||[]).length,0)} de ${a.reduce((s,g)=>s+previstoDe(g),0)}`;
+  const lista=arr=>html`<div class="grid gap-2">${arr.map(g=>html`<${Escala} key=${g._id} g=${g} escalas=${escalas} aberta=${abertas.has(g._id)} toggle=${()=>toggle(g._id)} filtro=${filtro} acao=${acao} setAcao=${setAcao} podeEditar=${podeEditar} ops=${opsComFim}/>`)}</div>`;
+  return html`<${motion.div} key="esc" initial=${{opacity:0,y:8}} animate=${{opacity:1,y:0}} exit=${{opacity:0}} transition=${{duration:.2}} class="grid grid-cols-1 md:grid-cols-12 gap-4">
+    <${Totais} escalas=${escalas}/>
+    <${Busca} filtro=${filtro} setFiltro=${setFiltro} achados=${achados} onAbrir=${()=>setAbertas(new Set(escalas.map(g=>g._id)))} onFechar=${()=>setAbertas(new Set())}/>
+    <${Card} className="md:col-span-12" title="Escalas operacionais" right=${html`<span class="font-mono text-[12px] text-muted tnum">${soma(ops_)}</span>`}>${lista(ops_)}</${Card}>
+    ${car.length>0&&html`<${Card} className="md:col-span-12" title="Liderança e apoio" right=${html`<span class="font-mono text-[12px] text-muted tnum">${soma(car)}</span>`}>${lista(car)}</${Card}>`}
+  </${motion.div}>`;
+}
+
+
+/* ============ ESCALAS ANTIGAS POR HORÁRIO ============ */
+const TURNO_RE=/-\s*([A-Z]\d)\s*-\s*(\d{2})H/;
+function rotuloTurno(t){const m=String(t||"").toUpperCase().match(TURNO_RE);return m?{label:`${m[1]} - ${m[2].padStart(2,"0")}h`,hora:`${parseInt(m[2],10)}h`,ord:parseInt(m[2],10)}:null}
+const COLUNAS=[["5h","6h"],["8h","13h"],["14h","22h","23h"]];
+function montarColunas(base,existentes){
+  const vistos=new Set();let cols=(base&&base.length===3?base:COLUNAS).map(c=>c.filter(h=>existentes.includes(h)&&!vistos.has(h)&&vistos.add(h)));
+  const faltam=existentes.filter(h=>!vistos.has(h)).sort((a,b)=>parseInt(a)-parseInt(b));
+  cols[2]=[...cols[2],...faltam];return cols;
+}
+function AntigasView({escalas,carregando,irPara,ordem,onSalvarOrdem}){
+  const [q,setQ]=useState("");const [org,setOrg]=useState(null);const [arrastando,setArrastando]=useState(null);const [salvando,setSalvando]=useState(false);
+  const itens=escalas.filter(g=>g.tipo!=="cargo").map(g=>{const r=rotuloTurno(g.turno);return r?{...r,g,codigo:(g.code==="Sem código"?"—":g.code)}:null}).filter(Boolean);
+  const nq=norm(q.trim());
+  const vis=nq?itens.filter(x=>norm(`${x.label} ${x.codigo} ${x.hora} ${x.g.turno}`).includes(nq)):itens;
+  const grupos={};vis.forEach(x=>(grupos[x.hora]??=[]).push(x));Object.values(grupos).forEach(a=>a.sort((a,b)=>a.label.localeCompare(b.label,"pt",{numeric:true})));
+  const todasHoras=[...new Set(itens.map(x=>x.hora))];
+  const cols=org||montarColunas(ordem,todasHoras);
+  const mover=(h,dc,dp)=>{const c=cols.map(x=>[...x]);const ci=c.findIndex(x=>x.includes(h));const pi=c[ci].indexOf(h);
+    if(dc){const ni=ci+dc;if(ni<0||ni>2)return;c[ci].splice(pi,1);c[ni].push(h)}
+    else{const np=pi+dp;if(np<0||np>=c[ci].length)return;c[ci].splice(pi,1);c[ci].splice(np,0,h)}setOrg(c)};
+  const soltar=(h,ci,antesDe)=>{if(!h)return;const c=cols.map(x=>x.filter(y=>y!==h));const pos=antesDe?c[ci].indexOf(antesDe):-1;if(pos<0)c[ci].push(h);else c[ci].splice(pos,0,h);setOrg(c);setArrastando(null)};
+  const concluir=async()=>{setSalvando(true);const ok=await onSalvarOrdem(org);setSalvando(false);if(ok)setOrg(null)};
+  const seta=(lbl,fn,dis)=>html`<button type="button" aria-label=${lbl} title=${lbl} disabled=${dis} onClick=${fn} class="w-8 h-8 rounded-full text-[14px] font-bold disabled:opacity-25" style=${{background:"color-mix(in srgb,var(--accent) 13%,transparent)",color:"var(--accent)"}}>${lbl.startsWith("Subir")?"↑":lbl.startsWith("Descer")?"↓":lbl.startsWith("Esquerda")?"←":"→"}</button>`;
+  const cartao=(h,ci,pi,tam)=>org?html`<div key=${h} draggable="true" onDragStart=${e=>{setArrastando(h);e.dataTransfer.effectAllowed="move";try{e.dataTransfer.setData("text/plain",h)}catch(_){}}} onDragEnd=${()=>setArrastando(null)}
+      onDragOver=${e=>e.preventDefault()} onDrop=${e=>{e.preventDefault();e.stopPropagation();soltar(arrastando,ci,h)}}
+      class=${"glass rounded-3xl p-3 flex items-center gap-3 cursor-grab active:cursor-grabbing border-dashed "+(arrastando===h?"opacity-40":"")} style=${{borderColor:"color-mix(in srgb,var(--accent) 35%,transparent)"}}>
+      <span class="text-muted text-[18px] select-none" aria-hidden="true">⠿</span>
+      <span class="font-display text-[18px] w-14" style=${{color:"var(--accent)"}}>${h}</span>
+      <span class="text-[12px] text-muted flex-1 min-w-0 truncate">${(grupos[h]||[]).length} escala(s)</span>
+      <span class="flex gap-1">${seta("Esquerda: mover "+h+" para a coluna da esquerda",()=>mover(h,-1,0),ci===0)}${seta("Subir "+h,()=>mover(h,0,-1),pi===0)}${seta("Descer "+h,()=>mover(h,0,1),pi===tam-1)}${seta("Direita: mover "+h+" para a coluna da direita",()=>mover(h,1,0),ci===2)}</span>
+    </div>`:html`<div key=${h} class="glass rounded-3xl overflow-hidden grid grid-cols-[64px_minmax(0,1fr)]">
+    <div class="grid place-items-center font-display text-[15px]" style=${{background:"color-mix(in srgb,var(--accent) 10%,transparent)",color:"var(--accent)"}}>${h}</div>
+    <div class="px-3 py-1.5">${grupos[h].map(x=>html`<button type="button" key=${x.g._id} onClick=${()=>irPara(x.g._id)} title=${"Abrir "+x.g.code+" na aba Escalas"}
+      class="w-full grid grid-cols-[minmax(0,1fr)_18px_auto] items-center gap-2 min-h-[42px] border-t border-[var(--sep)] first:border-t-0 text-left hover:bg-[var(--wash)] rounded-lg px-1 transition-colors">
+      <span class="min-w-0"><span class="block text-[14px] font-semibold tnum">${x.label}</span><span class="block text-[11px] text-muted">${(x.g.pessoas||[]).length} pessoas</span></span>
+      <span class="text-center text-muted">→</span>
+      <span class="font-mono text-[13px] font-bold px-2.5 py-1 rounded-lg tnum min-w-[62px] text-center" style=${{background:x.codigo==="—"?"color-mix(in srgb,var(--amber) 13%,transparent)":"color-mix(in srgb,var(--accent) 13%,transparent)",color:x.codigo==="—"?"var(--amber)":"var(--accent)",boxShadow:"inset 0 0 0 1px color-mix(in srgb,var(--accent) 18%,transparent)"}}>${x.codigo==="—"?"sem código":x.codigo}</span>
+    </button>`)}</div>
+  </div>`;
+  return html`<${motion.div} key="ant" initial=${{opacity:0,y:8}} animate=${{opacity:1,y:0}} exit=${{opacity:0}} transition=${{duration:.2}} class="grid grid-cols-1 md:grid-cols-12 gap-4">
+    <${Card} className="md:col-span-8">
+      <div class="text-[11px] uppercase tracking-[.16em] text-muted font-semibold">Referência Rostering</div>
+      <h1 class="font-display text-3xl sm:text-5xl tracking-tight mt-2 mb-3" style=${{textWrap:"balance"}}>Escalas antigas por horário</h1>
+      <div class="text-[14px] text-muted max-w-xl">Consulta rápida da escala atual para o código da escala antiga. Toque em uma linha para abrir a escala com as pessoas.</div>
+    </${Card}>
+    <${Card} className="md:col-span-4" title="Buscar">
+      <label for="busca-antiga" class="sr-only">Escala, horário ou código</label>
+      <input id="busca-antiga" type="search" value=${q} onInput=${e=>setQ(e.target.value)} placeholder="G1, 08h, 1333, B3…" autocomplete="off"
+        class="w-full bg-[var(--wash)] border border-line rounded-2xl px-4 py-3 font-display text-lg placeholder:text-[var(--ph)] outline-none focus:border-[var(--accent)] transition-colors"/>
+      <div class="text-[12px] text-muted mt-3">${q.trim()?`${vis.length} escala(s) encontrada(s)`:`${itens.length} escalas operacionais`}</div>
+      <div class="mt-3 flex gap-2 flex-wrap">${org?html`<${BtnSec} onClick=${()=>setOrg(null)}>Cancelar</${BtnSec}><${BtnSec} onClick=${()=>setOrg(montarColunas(null,todasHoras))}>Ordem padrão</${BtnSec}><${BtnPrim} disabled=${salvando} onClick=${concluir}>${salvando?"Salvando…":"Salvar ordem"}</${BtnPrim}>`
+        :html`<${BtnMini} onClick=${()=>{setQ("");setOrg(cols.map(c=>[...c]))}}>⠿ Organizar horários</${BtnMini}>`}</div>
+    </${Card}>
+    ${org&&html`<div class="md:col-span-12 rounded-2xl px-4 py-3 text-[13px]" style=${{background:"color-mix(in srgb,var(--accent) 8%,transparent)",color:"var(--ink)"}}>Arraste os horários para onde quiser (no computador) ou use as setas ← ↑ ↓ →. Clique em <b>Salvar ordem</b> para valer para todos.</div>`}
+    ${carregando?html`<div class="md:col-span-12 grid grid-cols-1 md:grid-cols-3 gap-4">${[1,2,3].map(i=>html`<div key=${i} class="glass rounded-3xl p-4"><div class="sk h-40 w-full"></div></div>`)}</div>`
+      :!vis.length?html`<${Card} className="md:col-span-12"><div class="text-[14px] text-muted">${itens.length?"Nenhuma escala encontrada com essa busca.":"Ainda não tem escalas na nuvem. Importe os dados em ⚙ Configurações."}</div></${Card}>`
+      :html`<div class="md:col-span-12 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 items-start">
+        ${cols.map((c,i)=>{const vc=org?c:c.filter(h=>grupos[h]);return html`<div key=${i} class=${"flex flex-col gap-4 min-w-0 "+(org?"rounded-3xl p-2 min-h-[120px] border border-dashed border-line":"")}
+          onDragOver=${org?e=>e.preventDefault():undefined} onDrop=${org?e=>{e.preventDefault();soltar(arrastando,i,null)}:undefined}>
+          ${org&&html`<div class="text-[11px] uppercase tracking-[.14em] text-muted font-semibold px-2 pt-1">Coluna ${i+1}</div>`}
+          ${vc.map((h,pi)=>cartao(h,i,pi,vc.length))}</div>`})}
+      </div>`}
+  </${motion.div}>`;
+}
+
+/* ============ ABA COBERTURA ============ */
+const HORAS_NOITE=h=>h>=20;
+function regraPadrao(o,d){if(o===d)return true;if(HORAS_NOITE(o)||HORAS_NOITE(d))return HORAS_NOITE(o)&&HORAS_NOITE(d);return Math.abs(o-d)<=5}
+const hojeISO=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`};
+const fmtData=iso=>{const [a,m,d]=iso.split("-");return `${d}/${m}/${a}`};
+const DIA_VAZIO={precisa:{},folga:{},ausentes:{},extras:[]};
+
+function Mini({children,ativo,onClick,label,tom}){return html`<button type="button" aria-label=${label} aria-pressed=${ativo?"true":"false"} onClick=${onClick}
+  class="text-[12px] font-medium px-2.5 py-1 rounded-full border transition-colors" style=${ativo?{background:fundoTom(tom||"accent"),borderColor:"transparent",color:corTom(tom||"accent")}:{borderColor:"var(--line)",color:"var(--muted)"}}>${children}</button>`}
+
+const ORIGEM={folga:"veio na folga",sem:"sem solicitação",extra:"diarista/extra"};
+const hh=h=>String(h).padStart(2,"0")+"h";
+function LinhaQuadro({n,dia,mudar,podeEditar}){
+  const [aberto,setAberto]=useState(false);
+  const g=n.g;const folga=!!dia.folga[g._id];const aus=new Set(dia.ausentes[g._id]||[]);
+  const s=folga?{tom:"muted",txt:"folga"}:n.saldo<0?{tom:"red",txt:`falta ${-n.saldo}`}:n.saldo>0?{tom:"amber",txt:`sobra ${n.saldo}`}:{tom:"green",txt:"ok"};
+  const ajPrecisa=d=>mudar(x=>({...x,precisa:{...x.precisa,[g._id]:Math.max(0,n.precisa+d)}}));
+  const togAus=pid=>mudar(x=>{const a=new Set(x.ausentes[g._id]||[]);a.has(pid)?a.delete(pid):a.add(pid);return {...x,ausentes:{...x.ausentes,[g._id]:[...a]}}});
+  const noPulmao=pid=>dia.extras.some(x=>x.pessoaId===pid);
+  const togVeio=p=>mudar(x=>x.extras.some(e=>e.pessoaId===p.id)?{...x,extras:x.extras.filter(e=>e.pessoaId!==p.id)}:{...x,extras:[...x.extras,{id:"x"+p.id,pessoaId:p.id,nome:p.nome,hora:n.hora,origem:"folga",escala:g.code}]});
+  const veio=folga?(g.pessoas||[]).filter(p=>noPulmao(p.id)).length:0;
+  return html`<div class="border-t border-[var(--sep)] first:border-t-0">
+    <div class="flex items-center gap-2.5 py-2.5 flex-wrap">
+      <span class="min-w-0 flex-1"><span class="font-display text-[14px] tnum">${g.code}</span><span class="text-[12px] text-muted ml-2">${n.label}</span>
+        ${n.vagaFixa>0&&!folga&&html`<span class="ml-2 align-middle"><${Pill} tom="red">HC ${n.hc}/${n.previsto}</${Pill}></span>`}</span>
+      ${!folga&&html`<span class="inline-flex items-center rounded-full border border-line text-[12px]" title="Quantas pessoas a escala precisa hoje">
+        <span class="pl-2.5 text-muted">precisa</span>
+        ${podeEditar&&html`<button type="button" aria-label=${"Diminuir necessidade de "+g.code} onClick=${()=>ajPrecisa(-1)} class="w-7 h-7 font-bold" style=${{color:"var(--accent)"}}>−</button>`}
+        <b class="tnum min-w-[22px] text-center ${podeEditar?"":"px-2"}">${n.precisa}</b>
+        ${podeEditar&&html`<button type="button" aria-label=${"Aumentar necessidade de "+g.code} onClick=${()=>ajPrecisa(1)} class="w-7 h-7 font-bold" style=${{color:"var(--accent)"}}>+</button>`}
+      </span>
+      <span class="text-[12px] text-muted tnum w-[72px] text-right">vieram <b class="text-ink">${n.presentes.length}</b></span>`}
+      ${folga&&veio>0&&html`<${Pill} tom="amber">${veio} no pulmão</${Pill}>`}
+      <${Pill} tom=${s.tom}>${s.txt}</${Pill}>
+      <button type="button" onClick=${()=>setAberto(!aberto)} aria-expanded=${aberto?"true":"false"} class="text-[12px] px-2.5 py-1 rounded-full border border-line text-muted hover:text-ink">${folga?"Quem veio":aus.size?`${aus.size} falta(s)`:"Faltas"} ${aberto?"▴":"▾"}</button>
+    </div>
+    <${AnimatePresence} initial=${false}>${aberto&&html`<${motion.div} key="a" ...${abrir} class="overflow-hidden">
+      <div class="pb-3 pl-1">
+        ${podeEditar&&html`<div class="mb-2"><${Mini} ativo=${folga} tom="amber" label=${"Escala "+g.code+" de folga hoje"} onClick=${()=>mudar(x=>({...x,folga:{...x.folga,[g._id]:!folga}}))}>${folga?"✓ De folga hoje":"Marcar escala de folga hoje"}</${Mini}></div>`}
+        ${n.vagaFixa>0&&!folga&&html`<div class="text-[12px] mb-2" style=${{color:"var(--red)"}}>Escala incompleta: ${n.vagaFixa} vaga(s) fixa(s)${n.vagas.some(v=>v.nome)?" — saiu: "+n.vagas.filter(v=>v.nome).map(v=>v.nome+(v.motivo?" ("+v.motivo+")":"")).join(", "):""}. Esse furo aparece todo dia até repor no HC.</div>`}
+        ${folga?html`<div class="text-[11px] text-muted mb-1.5">Toque em quem veio trabalhar na folga (vai para o pulmão às ${hh(n.hora)}):</div>
+          <div class="flex flex-wrap gap-1.5">${(g.pessoas||[]).map(p=>html`<${Mini} key=${p.id} ativo=${noPulmao(p.id)} tom="amber" label=${(noPulmao(p.id)?"Tirar do pulmão ":"Veio trabalhar na folga: ")+p.nome} onClick=${()=>podeEditar&&togVeio(p)}>${noPulmao(p.id)?"✓ ":""}${p.nome}</${Mini}>`)}</div>`
+        :html`<div class="text-[11px] text-muted mb-1.5">Toque em quem faltou (ABS):</div>
+        <div class="flex flex-wrap gap-1.5">${(g.pessoas||[]).map(p=>html`<${Mini} key=${p.id} ativo=${aus.has(p.id)} tom="red" label=${(aus.has(p.id)?"Desmarcar falta de ":"Marcar falta de ")+p.nome} onClick=${()=>podeEditar&&togAus(p.id)}>${aus.has(p.id)?"✕ ":""}${p.nome}</${Mini}>`)}</div>`}
+      </div>
+    </${motion.div}>`}</${AnimatePresence}>
+  </div>`;
+}
+
+function Pulmao({dia,mudar,horas,podeEditar,todos,pode,uso,presentesIds}){
+  const [q,setQ]=useState("");const [sel,setSel]=useState(null);const [origem,setOrigem]=useState("sem");const [hora,setHora]=useState(null);
+  const achados=useMemo(()=>{const t=norm(q.trim());const d=q.replace(/\D/g,"");if(t.length<2)return [];
+    return todos.filter(p=>norm(p.nome).includes(t)||(d.length>=3&&(p.cpf||"").replace(/\D/g,"").includes(d))).slice(0,6)},[q,todos]);
+  const escolher=p=>{setSel(p);setHora(p.hora??null);setOrigem("sem");setQ(p.nome)};
+  const limpar=()=>{setSel(null);setQ("");setHora(null);setOrigem("sem")};
+  const nomeNovo=q.trim();
+  const jaTem=sel&&dia.extras.some(x=>x.pessoaId===sel.id);
+  const jaPresente=sel&&presentesIds.has(sel.id);
+  const pronto=hora!=null&&(sel?!jaTem&&!jaPresente:nomeNovo.length>1);
+  const add=()=>{if(!pronto)return;
+    const item=sel?{id:"x"+sel.id,pessoaId:sel.id,nome:sel.nome,hora,origem,escala:sel.code}:{id:"x"+Date.now().toString(36),nome:nomeNovo,hora,origem:"extra"};
+    mudar(x=>({...x,extras:[...x.extras,item]}));limpar()};
+  const horasDe=x=>x.hora!=null?horas.filter(d=>pode(x.hora,d)):(x.horas||[]);
+  return html`<${Card} title="Pulmão do dia" right=${html`<span class="text-[12px] text-muted">${dia.extras.length} pessoa(s)</span>`}>
+    <div class="text-[12px] text-muted mb-3">Quem veio sem estar no quadro: de folga, sem solicitação ou diarista. Cada um só cobre horário compatível com a hora em que bateu o ponto, e o painel usa primeiro o mesmo horário.</div>
+    ${podeEditar&&html`<div class="grid gap-2 mb-3">
+      <input id="pulmao-busca" class=${campo} value=${q} onInput=${e=>{setQ(e.target.value);setSel(null)}} placeholder="Nome ou CPF de quem veio" autocomplete="off"/>
+      ${!sel&&achados.length>0&&html`<div class="rounded-2xl border border-line overflow-hidden">${achados.map(p=>html`<button type="button" key=${p.id} onClick=${()=>escolher(p)} class="w-full text-left px-3.5 py-2 text-[13px] border-t border-[var(--sep)] first:border-t-0 hover:bg-[var(--wash)]">${p.nome}<span class="text-muted text-[11px] ml-2">${p.code} · ${p.label}</span></button>`)}</div>`}
+      ${(sel||nomeNovo.length>1)&&html`<div class="grid gap-2 rounded-2xl p-3" style=${{background:"var(--wash)"}}>
+        ${sel?html`<div class="text-[12px] text-muted">Escala dele(a): <b class="text-ink">${sel.code} · ${sel.label}</b></div>
+          ${jaPresente&&html`<div class="text-[12px]" style=${{color:"var(--amber)"}}>Essa pessoa já conta como presente na escala dela hoje. Marque a escala como folga ou a pessoa como falta antes.</div>`}
+          ${jaTem&&html`<div class="text-[12px]" style=${{color:"var(--amber)"}}>Já está no pulmão.</div>`}
+          <div class="flex flex-wrap gap-1.5">${["sem","folga"].map(o=>html`<${Mini} key=${o} ativo=${origem===o} tom="amber" label=${ORIGEM[o]} onClick=${()=>setOrigem(o)}>${ORIGEM[o]}</${Mini}>`)}</div>`
+        :html`<div class="text-[12px] text-muted">Não está no HC: entra como <b class="text-ink">diarista/extra</b>.</div>`}
+        <div class="text-[11px] text-muted">Bateu o ponto às:</div>
+        <div class="flex flex-wrap gap-1.5">${horas.map(h=>html`<${Mini} key=${h} ativo=${hora===h} label=${"Bateu às "+h+"h"} onClick=${()=>setHora(h)}>${h}h</${Mini}>`)}</div>
+        ${hora!=null&&html`<div class="text-[11px] text-muted">Pode cobrir: ${horas.filter(d=>pode(hora,d)).map(hh).join(", ")||"nenhum horário"}</div>`}
+        <div class="flex gap-2"><${BtnPrim} disabled=${!pronto} onClick=${add}>Pôr no pulmão</${BtnPrim}><${BtnSec} onClick=${limpar}>Cancelar</${BtnSec}></div>
+      </div>`}
+    </div>`}
+    ${dia.extras.length?dia.extras.map(x=>{const u=uso[x.id];return html`<div key=${x.id} class="flex items-center gap-2 py-2 border-t border-[var(--sep)] first:border-t-0">
+      <span class="min-w-0 flex-1 text-[14px]">${x.nome} <${Pill} tom="amber">${ORIGEM[x.origem]||"extra"}</${Pill}>
+        <span class="block text-[11px] text-muted">${x.hora!=null?`bateu às ${hh(x.hora)}${x.escala?" · escala "+x.escala:""} · `:""}pode cobrir: ${horasDe(x).map(hh).join(", ")||"—"}</span>
+        <span class="block text-[11px] font-semibold" style=${{color:u?"var(--green)":"var(--muted)"}}>${u?"✓ usado → "+u:"sobrando no pulmão"}</span></span>
+      ${podeEditar&&html`<${BtnMini} perigo label=${"Tirar "+x.nome+" do pulmão"} onClick=${()=>mudar(y=>({...y,extras:y.extras.filter(z=>z.id!==x.id)}))}>Tirar</${BtnMini}>`}
+    </div>`}):html`<div class="text-[13px] text-muted">Ninguém no pulmão hoje.</div>`}
+  </${Card}>`;
+}
+
+function Regras({horas,regras,setRegra,restaurar,podeEditar}){
+  const [aberto,setAberto]=useState(false);
+  const pode=(o,d)=>regras[o+">"+d]??regraPadrao(o,d);
+  return html`<${Card} title="Regras de horário" right=${html`<button type="button" onClick=${()=>setAberto(!aberto)} aria-expanded=${aberto?"true":"false"} class="text-[12px] text-muted hover:text-ink">${aberto?"Fechar ▴":"Ver e editar ▾"}</button>`}>
+    <div class="text-[12px] text-muted">Quem bate o ponto num horário (linha) pode cobrir outro horário (coluna)? Por padrão: diferença de até 5h no dia, e 22h/23h só entre si. Vale para as trocas e para o pulmão.</div>
+    <${AnimatePresence} initial=${false}>${aberto&&html`<${motion.div} key="r" ...${abrir} class="overflow-hidden">
+      <div class="overflow-x-auto mt-3"><table class="text-[12px] tnum border-separate" style=${{borderSpacing:"3px"}}>
+        <thead><tr><th class="text-left text-muted font-medium pr-2">de \ para</th>${horas.map(h=>html`<th key=${h} class="font-display font-medium px-1" style=${{color:"var(--accent)"}}>${h}h</th>`)}</tr></thead>
+        <tbody>${horas.map(o=>html`<tr key=${o}><th class="text-left font-display font-medium pr-2" style=${{color:"var(--accent)"}}>${o}h</th>
+          ${horas.map(d=>{const v=pode(o,d);const mesmo=o===d;return html`<td key=${d}><button type="button" disabled=${mesmo||!podeEditar} onClick=${()=>setRegra(o,d,!v)}
+            aria-label=${`${o}h pode cobrir ${d}h: ${v?"sim":"não"}`} class="w-9 h-8 rounded-lg font-bold disabled:cursor-default"
+            style=${{background:v?fundoTom("green"):"var(--wash)",color:v?corTom("green"):"var(--muted)",opacity:mesmo?.5:1}}>${v?"✓":"·"}</button></td>`})}</tr>`)}</tbody>
+      </table></div>
+      ${podeEditar&&html`<div class="mt-3"><${BtnMini} onClick=${restaurar}>Voltar ao padrão</${BtnMini}></div>`}
+    </${motion.div}>`}</${AnimatePresence}>
+  </${Card}>`;
+}
+
+/* ---- rótulos dos furos ---- */
+const motNome=m=>!m?"Vaga fixa":m.tipo==="abs"?(m.pessoa?m.pessoa.nome:"ABS"):m.tipo==="troca"?`Lugar de ${m.nome} (foi p/ ${m.para})`:m.nome?`Vaga de ${m.nome}${m.motivo?" ("+m.motivo+")":""}`:"Vaga fixa";
+const motTag=m=>!m?"ESCALA INCOMPLETA":m.tipo==="abs"?"AUSENTE":m.tipo==="troca"?"TROCA":"ESCALA INCOMPLETA";
+const motTom=m=>m&&m.tipo==="troca"?"accent":"red";
+const motAnt=m=>!m?"a vaga fixa":m.tipo==="abs"?(m.pessoa?"posição de "+m.pessoa.nome:"a posição do ABS"):m.tipo==="troca"?"o lugar de "+m.nome:m.nome?"a vaga de "+m.nome:"a vaga fixa";
+const passoDe=(p,rot)=>p.extra?`pulmão (${ORIGEM[p.origem]||"extra"}${p.hora!=null?" · bateu "+hh(p.hora):""})`:rot(p.de)+(p.excedente?" · excedente":"");
+
+/* ---- cálculo de um dia (quadro, opções e panorama) ---- */
+const PRAZO_DIAS=5;
+const isoDe=t=>`${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,"0")}-${String(t.getDate()).padStart(2,"0")}`;
+const addDias=(iso,n)=>{const [a,m,d]=iso.split("-").map(Number);return isoDe(new Date(a,m-1,d+n))};
+const difDias=(a,b)=>Math.round((new Date(a+"T12:00:00")-new Date(b+"T12:00:00"))/864e5);
+const dm=iso=>{const [,m,d]=iso.split("-");return `${d}/${m}`};
+const SEMANA=["dom","seg","ter","qua","qui","sex","sáb"];
+const semanaDe=iso=>{const [a,m,d]=iso.split("-").map(Number);return SEMANA[new Date(a,m-1,d).getDay()]};
+const dg=s=>String(s||"").replace(/\D/g,"");
+function prazoDe(data){const ate=addDias(data,PRAZO_DIAS);const r=difDias(ate,hojeISO());return {ate,r,txt:r<0?"prazo encerrado":r===0?`último dia para atribuir (${dm(ate)})`:`atribuir até ${dm(ate)} · falta${r>1?"m":""} ${r} dia${r>1?"s":""}`,tom:r<0?"muted":r<=1?"red":"amber"}}
+/* quem saiu de cada escala e ainda não foi reposto: demissão, INSS, mudança de cargo/escala… */
+function mapaSaidas(escalas,historico){
+  const porCode={};escalas.forEach(g=>porCode[g.code]=g);
+  const ativo=new Set();const em={};escalas.forEach(g=>(g.pessoas||[]).forEach(p=>{const k=dg(p.cpf)||norm(p.nome);ativo.add(k);em[k]=g._id}));
+  const m={};const visto=new Set();
+  /* troca entre escalas (um sai, outro entra) não abre vaga: cada entrada anula uma saída */
+  const entradas={};(historico||[]).forEach(h=>{if(h.tipo==="Mudou de escala"&&h.para)entradas[h.para]=(entradas[h.para]||0)+1});
+  (historico||[]).forEach(h=>{const k=dg(h.cpf)||norm(h.nome);
+    if(h.tipo==="Removido"){const gid=h.escalaId||(porCode[h.escala]||{})._id;if(!gid||ativo.has(k)||visto.has(k+gid))return;visto.add(k+gid);
+      (m[gid]??=[]).push({nome:h.nome,motivo:h.motivo||"saiu"})}
+    else if(h.tipo==="Mudou de escala"){const o=porCode[h.escala];if(!o||em[k]===o._id||visto.has(k+o._id))return;if(entradas[h.escala]>0){entradas[h.escala]--;return}visto.add(k+o._id);
+      const dest=porCode[h.para];(m[o._id]??=[]).push({nome:h.nome,motivo:dest&&dest.tipo==="cargo"?"mudança de cargo → "+h.para:"mudou p/ "+h.para})}});
+  return m;
+}
+function calcularDia(escalas,dia,saidas,pode){
+  dia={...DIA_VAZIO,...(dia||{})};const trocas=dia.trocas||[];const absQ=dia.absQtd||{};
+  const gs=escalas.filter(g=>g.tipo!=="cargo"&&rotuloTurno(g.turno));const code={};gs.forEach(g=>code[g._id]=g.code);
+  const movidos=new Set(trocas.filter(t=>t.pessoaId&&!t.pulmaoId).map(t=>t.pessoaId));
+  const nos=gs.map(g=>{const r=rotuloTurno(g.turno);
+    const folga=!!dia.folga[g._id];const aus=new Set(dia.ausentes[g._id]||[]);const ps=g.pessoas||[];
+    const ausN=folga?[]:ps.filter(p=>aus.has(p.id));
+    let base=folga?[]:ps.filter(p=>!aus.has(p.id)&&!movidos.has(p.id));
+    const anon=folga?0:Math.min(absQ[g._id]||0,base.length);if(anon)base=base.slice(0,base.length-anon);
+    const sai=folga?[]:trocas.filter(t=>t.pessoaId&&!t.pulmaoId&&t.de===g._id);
+    const entra=trocas.filter(t=>t.para===g._id).map(t=>({id:t.pulmaoId||t.pessoaId||t.id,nome:t.nome,cpf:t.cpf,troca:t.id}));
+    const presentes=[...base,...entra];
+    const previsto=previstoDe(g);const precisa=folga?0:(dia.precisa[g._id]??previsto);
+    const vagaFixa=Math.max(0,precisa-ps.length);const sd=saidas[g._id]||[];
+    const vagas=Array.from({length:vagaFixa},(_,i)=>({tipo:"vaga",...(sd[i]||{nome:null})}));
+    const motivos=[...ausN.map(p=>({tipo:"abs",pessoa:p})),...Array.from({length:anon},()=>({tipo:"abs",pessoa:null})),...sai.map(t=>({tipo:"troca",nome:t.nome,para:code[t.para]||"?"})),...vagas];
+    return {id:g._id,g,hora:r.ord,label:r.label,presentes,ausentes:ausN,anon,abs:ausN.length+anon,precisa,previsto,hc:ps.length,vagaFixa,vagas,motivos,saldo:presentes.length-precisa,falta:Math.max(0,precisa-presentes.length),folga}});
+  const horas=[...new Set(nos.map(n=>n.hora))].sort((a,b)=>a-b);
+  const presentesIds=new Set(nos.flatMap(n=>n.presentes.map(p=>p.id)));
+  const todos=nos.flatMap(n=>(n.g.pessoas||[]).map(p=>({...p,code:n.g.code,label:n.label,hora:n.hora,gid:n.id})));
+  const usadosP=new Set(trocas.filter(t=>t.pulmaoId).map(t=>t.pulmaoId));
+  const pulmaoTodo=(dia.extras||[]).filter(x=>x.pessoaId?!presentesIds.has(x.pessoaId):!nos.some(n=>n.presentes.some(p=>!p.troca&&norm(p.nome)===norm(x.nome))))
+    .map(x=>x.hora!=null?{...x,horas:horas.filter(d=>pode(x.hora,d))}:x);
+  const pulmao=pulmaoTodo.filter(x=>!usadosP.has(x.id));
+  const res=resolverCobertura(nos.filter(n=>!n.folga),pulmao,pode);
+  const byId=Object.fromEntries(nos.map(n=>[n.id,n]));
+  const pend=trocas.filter(t=>!t.feito).length;
+  const abertos=nos.reduce((s,n)=>s+n.falta,0);
+  const sem=res.semCobertura.reduce((s,x)=>s+x.faltam,0);
+  return {dia,nos,horas,presentesIds,todos,pulmao,pulmaoTodo,res,byId,trocas,pend,abertos,sem,
+    vagasFixas:nos.reduce((s,n)=>s+(n.folga?0:n.vagaFixa),0),abs:nos.reduce((s,n)=>s+n.abs,0)};
+}
+/* opções para tapar o furo de uma escala: pulmão e sobras não abrem furo; puxar de escala completa abre */
+function opcoesPara(n,calc,pode){
+  const ok=h=>pode(h,n.hora);const dist=h=>Math.abs(h-n.hora);
+  const pul=calc.pulmao.filter(x=>x.hora!=null?ok(x.hora):(x.horas||[]).includes(n.hora)).sort((a,b)=>dist(a.hora??n.hora)-dist(b.hora??n.hora));
+  const outras=calc.nos.filter(m=>m.id!==n.id&&!m.folga&&ok(m.hora)&&m.presentes.some(p=>!p.troca)).sort((a,b)=>dist(a.hora)-dist(b.hora)||b.saldo-a.saldo);
+  return {pul,sobra:outras.filter(m=>m.saldo>0),puxar:outras.filter(m=>m.saldo<=0)};
+}
+
+function textoCobertura(data,calc,rot){
+  const {res,trocas}=calc;const nm=id=>calc.byId[id]?calc.byId[id].g.code:"pulmão";
+  let t=`*COBERTURA – ${fmtData(data)}*\n`;
+  if(trocas.length){t+=`\n*TROCAS / ATRIBUIR NA MELI*\n`;trocas.forEach(x=>{t+=`${x.feito?"✅":"▫️"} ${x.nome}${x.cpf?" — "+x.cpf:""}: ${x.pulmaoId?"pulmão":"era da "+nm(x.de)} → ${nm(x.para)} — De ${dm(data)} Até ${dm(data)}\n`})}
+  res.cadeias.forEach((c,i)=>{
+    t+=`\n*SUGESTÃO ${i+1}*\n${motNome(c.furo.mot)} — ${rot(c.furo.no)} — ${motTag(c.furo.mot)}\n`;
+    let ant=motAnt(c.furo.mot);
+    c.passos.forEach(p=>{t+=`${p.pessoa.nome} — ${passoDe(p,rot)} → assume ${ant}\n`;ant="posição de "+p.pessoa.nome});
+    t+=`✓ Cadeia fechada\n`;
+  });
+  t+=calc.sem?`\n⚠ QUADRO NÃO FECHADO — permanece${calc.sem>1?"m":""} ${calc.sem} posição(ões) sem cobertura: ${res.semCobertura.map(x=>`${rot(x.no)} (${x.motivos.map(motNome).join(", ")})`).join("; ")}`:calc.abertos?`\n✓ Dá para fechar o quadro com a sugestão (${res.movs} movimentação(ões))`:`\n✓ QUADRO FECHADO`;
+  return t;
+}
+
+function VagasFixas({nos,compacto}){
+  const inc=nos.filter(n=>!n.folga&&n.vagaFixa>0);
+  if(!inc.length)return html`<div class="text-[13px] text-muted">Todas as escalas de hoje estão completas.</div>`;
+  return html`<div>${inc.map(n=>html`<div key=${n.id} class="flex items-start gap-2 py-2 border-t border-[var(--sep)] first:border-t-0 text-[13px]">
+    <span class="min-w-0 flex-1"><b class="font-display tnum">${n.g.code}</b> <span class="text-muted">· ${n.label} · HC ${n.hc} de ${n.previsto}</span>
+      ${n.vagas.some(v=>v.nome)&&html`<span class="block text-[12px] text-muted">${n.vagas.filter(v=>v.nome).map(v=>v.nome+" — "+v.motivo).join(" · ")}</span>`}</span>
+    <${Pill} tom="red">${n.vagaFixa} a menos</${Pill}></div>`)}</div>`;
+}
+
+/* ---- LANÇAR O DIA: ABS por escala, escalas com gente a menos e trocas ---- */
+function Lancar({calc,mudar,podeEditar}){
+  const {nos}=calc;const ativos=nos.filter(n=>!n.folga).sort((a,b)=>a.hora-b.hora||String(a.g.code).localeCompare(String(b.g.code)));
+  const opc=ativos.map(n=>html`<option key=${n.id} value=${n.id}>${n.g.code} · ${n.label}</option>`);
+  const [gAbs,setGAbs]=useState("");const [qAbs,setQAbs]=useState(1);
+  const addAbs=()=>{if(!gAbs)return;mudar(x=>({...x,absQtd:{...(x.absQtd||{}),[gAbs]:((x.absQtd||{})[gAbs]||0)+qAbs}}));setGAbs("");setQAbs(1)};
+  const ajAbs=(gid,d)=>mudar(x=>{const v=Math.max(0,((x.absQtd||{})[gid]||0)+d);const a={...(x.absQtd||{})};if(v)a[gid]=v;else delete a[gid];return {...x,absQtd:a}});
+  const comAbs=nos.filter(n=>n.abs>0);
+  const [q,setQ]=useState("");const [sel,setSel]=useState(null);const [para,setPara]=useState("");
+  const achados=useMemo(()=>{const t=norm(q.trim());const d=dg(q);if(t.length<2||sel)return [];
+    return calc.todos.filter(p=>norm(p.nome).includes(t)||(d.length>=3&&dg(p.cpf).includes(d))).slice(0,6)},[q,calc.todos,sel]);
+  const jaTrocado=sel&&calc.trocas.some(t=>t.pessoaId===sel.id&&!t.pulmaoId);
+  const addTroca=()=>{if(!sel||!para||para===sel.gid||jaTrocado)return;
+    mudar(x=>({...x,trocas:[...(x.trocas||[]),{id:"t"+Date.now().toString(36),pessoaId:sel.id,nome:sel.nome,cpf:sel.cpf||"",de:sel.gid,para,feito:false}]}));setQ("");setSel(null);setPara("")};
+  const sub=t=>html`<div class="text-[11px] uppercase tracking-[.14em] text-muted font-semibold mt-5 mb-2 first:mt-0">${t}</div>`;
+  return html`<${Card} title="Lançar o dia">
+    ${sub("1 · Faltas (ABS) por escala")}
+    ${podeEditar&&html`<div class="flex gap-2 flex-wrap items-center mb-2">
+      <select id="abs-escala" aria-label="Escala com falta" class=${campo+" !w-auto flex-1 min-w-[180px]"} value=${gAbs} onChange=${e=>setGAbs(e.target.value)}><option value="">Escolha a escala…</option>${opc}</select>
+      <span class="inline-flex items-center rounded-full border border-line text-[13px]"><button type="button" aria-label="Menos" onClick=${()=>setQAbs(v=>Math.max(1,v-1))} class="w-8 h-9 font-bold" style=${{color:"var(--accent)"}}>−</button><b class="tnum min-w-[22px] text-center">${qAbs}</b><button type="button" aria-label="Mais" onClick=${()=>setQAbs(v=>v+1)} class="w-8 h-9 font-bold" style=${{color:"var(--accent)"}}>+</button></span>
+      <${BtnPrim} disabled=${!gAbs} onClick=${addAbs}>Lançar ABS</${BtnPrim}>
+    </div>`}
+    ${comAbs.length?comAbs.map(n=>html`<div key=${n.id} class="flex items-center gap-2 py-1.5 border-t border-[var(--sep)] first:border-t-0 text-[13px]">
+      <span class="min-w-0 flex-1"><b class="font-display tnum">${n.g.code}</b> <span class="text-muted">· ${n.label}</span>${n.ausentes.length?html`<span class="block text-[11px] text-muted">com nome: ${n.ausentes.map(p=>p.nome).join(", ")}</span>`:null}</span>
+      ${podeEditar&&html`<button type="button" aria-label=${"Menos um ABS na "+n.g.code} onClick=${()=>ajAbs(n.id,-1)} disabled=${!n.anon} class="w-7 h-7 rounded-full border border-line font-bold disabled:opacity-30" style=${{color:"var(--accent)"}}>−</button>`}
+      <${Pill} tom="red">${n.abs} ABS</${Pill}>
+      ${podeEditar&&html`<button type="button" aria-label=${"Mais um ABS na "+n.g.code} onClick=${()=>ajAbs(n.id,1)} class="w-7 h-7 rounded-full border border-line font-bold" style=${{color:"var(--accent)"}}>+</button>`}
+    </div>`):html`<div class="text-[13px] text-muted">Nenhum ABS lançado.</div>`}
+
+    ${sub("2 · Escalas rodando com gente a menos")}
+    <div class="text-[12px] text-muted mb-1">Entra sozinho todo dia: desligamento, INSS, mudança de cargo ou de escala (vem do Histórico).</div>
+    <${VagasFixas} nos=${nos}/>
+
+    ${sub("3 · Trocas (quem foi atribuído em outra escala)")}
+    ${podeEditar&&html`<div class="grid gap-2">
+      <input id="troca-busca" class=${campo} value=${q} onInput=${e=>{setQ(e.target.value);setSel(null)}} placeholder="Quem foi trocado? Nome ou CPF" autocomplete="off"/>
+      ${achados.length>0&&html`<div class="rounded-2xl border border-line overflow-hidden">${achados.map(p=>html`<button type="button" key=${p.id} onClick=${()=>{setSel(p);setQ(p.nome)}} class="w-full text-left px-3.5 py-2 text-[13px] border-t border-[var(--sep)] first:border-t-0 hover:bg-[var(--wash)]">${p.nome}<span class="text-muted text-[11px] ml-2">${p.code} · ${p.label}</span></button>`)}</div>`}
+      ${sel&&html`<div class="grid gap-2 rounded-2xl p-3" style=${{background:"var(--wash)"}}>
+        <div class="text-[13px]"><b>${sel.nome}</b> <span class="text-muted">é da</span> <b>${sel.code}</b> <span class="text-muted">· ${sel.label}</span></div>
+        ${jaTrocado&&html`<div class="text-[12px]" style=${{color:"var(--amber)"}}>Já tem uma troca lançada para essa pessoa hoje.</div>`}
+        <select id="troca-para" aria-label="Foi para a escala" class=${campo} value=${para} onChange=${e=>setPara(e.target.value)}><option value="">Foi atribuído(a) na escala…</option>${ativos.filter(n=>n.id!==sel.gid).map(n=>html`<option key=${n.id} value=${n.id}>${n.g.code} · ${n.label}${pode0(sel.hora,n.hora)?"":" (horário incompatível)"}</option>`)}</select>
+        <div class="flex gap-2"><${BtnPrim} disabled=${!para||jaTrocado} onClick=${addTroca}>Lançar troca</${BtnPrim}><${BtnSec} onClick=${()=>{setQ("");setSel(null);setPara("")}}>Cancelar</${BtnSec}></div>
+      </div>`}
+    </div>`}
+    <div class="text-[12px] text-muted mt-2">Ao lançar "Maria da 1333 → 59", a 59 ganha a Maria e a 1333 fica com o furo "lugar de Maria". O painel mostra as opções para tapar em <b class="text-ink">Furos em aberto</b>.</div>
+  </${Card}>`;
+}
+let pode0=()=>true; /* regra de horário atual (definida pela aba Cobertura) */
+
+function FuroItem({n,calc,pode,mudar,podeEditar}){
+  const [mais,setMais]=useState(false);
+  const o=opcoesPara(n,calc,pode);
+  const usar=(p,m)=>mudar(x=>({...x,trocas:[...(x.trocas||[]),{id:"t"+Date.now().toString(36)+Math.random().toString(36).slice(2,5),pessoaId:p.id,nome:p.nome,cpf:p.cpf||"",de:m.id,para:n.id,feito:false}]}));
+  const usarP=x=>{const pes=x.pessoaId?calc.todos.find(t=>t.id===x.pessoaId):null;
+    mudar(y=>({...y,trocas:[...(y.trocas||[]),{id:"t"+Date.now().toString(36),pulmaoId:x.id,pessoaId:x.pessoaId||null,nome:x.nome,cpf:pes?pes.cpf||"":"",de:null,para:n.id,origem:x.origem,feito:false}]}))};
+  const chip=(txt,on,tom,label)=>html`<button type="button" disabled=${!podeEditar} onClick=${on} aria-label=${label} class="text-[12px] font-medium px-2.5 py-1 rounded-full border transition-colors hover:brightness-110" style=${{background:fundoTom(tom),borderColor:"transparent",color:corTom(tom)}}>${txt}</button>`;
+  const pessoasDe=m=>m.presentes.filter(p=>!p.troca);
+  return html`<div class="rounded-2xl border border-line p-3.5" style=${{background:"var(--wash)"}}>
+    <div class="flex items-center gap-2 flex-wrap"><b class="font-display tnum text-[15px]">${n.g.code}</b><span class="text-[12px] text-muted">${n.label}</span><span class="ml-auto"><${Pill} tom="red">falta ${n.falta}</${Pill}></span></div>
+    <div class="mt-1.5 grid gap-1">${n.motivos.slice(0,n.falta).map((m,i)=>html`<div key=${i} class="text-[13px] flex items-start gap-2"><span style=${{color:"var(--red)"}}>●</span><span class="min-w-0">${motNome(m)} <${Pill} tom=${motTom(m)}>${motTag(m)}</${Pill}></span></div>`)}
+      ${n.falta>n.motivos.length&&html`<div class="text-[13px] text-muted">● ${n.falta-n.motivos.length} a mais do que o previsto ("precisa")</div>`}</div>
+    <div class="text-[11px] uppercase tracking-[.14em] text-muted font-semibold mt-3 mb-1.5">Opções no horário compatível</div>
+    ${!o.pul.length&&!o.sobra.length&&!o.puxar.length&&html`<div class="text-[13px] text-muted">Ninguém disponível num horário compatível. Ponha alguém no pulmão ou revise as regras de horário.</div>`}
+    ${o.pul.length>0&&html`<div class="mb-2"><div class="text-[12px] text-muted mb-1">Do pulmão (não abre outro furo):</div><div class="flex flex-wrap gap-1.5">${o.pul.map(x=>chip(`${x.nome} · ${x.hora!=null?hh(x.hora):"extra"}`,()=>usarP(x),"green","Usar "+x.nome+" do pulmão na "+n.g.code))}</div></div>`}
+    ${o.sobra.length>0&&html`<div class="mb-2"><div class="text-[12px] text-muted mb-1">De escala com sobra (não abre outro furo):</div>${o.sobra.map(m=>html`<div key=${m.id} class="mb-1.5"><div class="text-[12px]"><b>${m.g.code}</b> <span class="text-muted">· ${m.label} · sobra ${m.saldo}</span></div><div class="flex flex-wrap gap-1.5 mt-1">${pessoasDe(m).slice(0,8).map(p=>html`<span key=${p.id}>${chip(p.nome,()=>usar(p,m),"green","Trocar "+p.nome+" da "+m.g.code+" para "+n.g.code)}</span>`)}</div></div>`)}</div>`}
+    ${o.puxar.length>0&&html`<div><button type="button" onClick=${()=>setMais(!mais)} aria-expanded=${mais?"true":"false"} class="text-[12px] text-muted hover:text-ink text-left">${mais?"▴":"▾"} Puxar de escala completa — abre furo lá (${o.puxar.length} escala(s))</button>
+      ${mais&&html`<div class="mt-1.5">${o.puxar.map(m=>html`<div key=${m.id} class="mb-1.5"><div class="text-[12px]"><b>${m.g.code}</b> <span class="text-muted">· ${m.label}${m.saldo<0?" · já falta "+(-m.saldo):""}</span></div><div class="flex flex-wrap gap-1.5 mt-1">${pessoasDe(m).slice(0,8).map(p=>html`<span key=${p.id}>${chip(p.nome,()=>usar(p,m),"amber","Trocar "+p.nome+" da "+m.g.code+" para "+n.g.code+" (abre furo)")}</span>`)}</div></div>`)}</div>`}</div>`}
+  </div>`;
+}
+function FurosAbertos({calc,pode,mudar,podeEditar}){
+  const lista=calc.nos.filter(n=>!n.folga&&n.falta>0).sort((a,b)=>a.hora-b.hora);
+  return html`<${Card} title="Furos em aberto" right=${html`<${Pill} tom=${lista.length?"red":"green"}>${calc.abertos}</${Pill}>`}>
+    ${lista.length?html`<div class="grid gap-3">${lista.map(n=>html`<${FuroItem} key=${n.id} n=${n} calc=${calc} pode=${pode} mudar=${mudar} podeEditar=${podeEditar}/>`)}</div>`
+      :html`<div class="text-[14px]" style=${{color:"var(--green)"}}>✓ Nenhum furo em aberto neste dia.</div>`}
+  </${Card}>`;
+}
+function Trocas({calc,data,mudar,podeEditar,toast,rot}){
+  const {trocas,byId}=calc;const pz=prazoDe(data);const nm=id=>byId[id]?byId[id].g.code:"?";
+  if(!trocas.length)return null;
+  const set=(id,f)=>mudar(x=>({...x,trocas:(x.trocas||[]).map(t=>t.id===id?f(t):t)}));
+  const del=id=>mudar(x=>({...x,trocas:(x.trocas||[]).filter(t=>t.id!==id)}));
+  const copiar=async()=>{try{await navigator.clipboard.writeText(textoCobertura(data,calc,rot));toast("Copiado.")}catch(e){toast("Não deu para copiar aqui.",true)}};
+  return html`<${Card} title="Trocas do dia · atribuir na Meli" right=${html`<${BtnMini} onClick=${copiar}>Copiar</${BtnMini}>`}>
+    <div class="flex items-center gap-2 flex-wrap mb-2"><${Pill} tom=${pz.tom}>${pz.txt}</${Pill}><span class="text-[12px] text-muted">${calc.pend} de ${trocas.length} para atribuir</span></div>
+    <div class="text-[12px] text-muted mb-1">Atribua cada pessoa na escala de destino com <b class="text-ink">De ${dm(data)} Até ${dm(data)}</b> e marque ✓. Confira antes se ela não tem credencial ativa nesse dia em outra escala.</div>
+    ${trocas.map(t=>{const furoOrigem=t.de&&byId[t.de]&&byId[t.de].falta>0;return html`<div key=${t.id} class="flex items-start gap-2.5 py-2 border-t border-[var(--sep)] first:border-t-0">
+      <input type="checkbox" class="mt-1 w-4 h-4 accent-[var(--accent)]" checked=${!!t.feito} disabled=${!podeEditar} onChange=${()=>set(t.id,x=>({...x,feito:!x.feito}))} aria-label=${"Atribuição de "+t.nome+" feita"}/>
+      <span class="min-w-0 flex-1 text-[13px] ${t.feito?"opacity-60":""}"><b>${t.nome}</b>${t.cpf?html` <span class="text-muted tnum">${t.cpf}</span>`:null}
+        <span class="block text-[12px]">${t.pulmaoId?html`<span class="text-muted">pulmão (${ORIGEM[t.origem]||"extra"})</span>`:html`<span class="text-muted">era da</span> <b>${nm(t.de)}</b>`} <span class="text-muted">→ foi para</span> <b>${nm(t.para)}</b> <span class="text-muted">· ${byId[t.para]?byId[t.para].label:""}</span></span>
+        ${furoOrigem&&html`<span class="block text-[11px]" style=${{color:"var(--red)"}}>abriu furo na ${nm(t.de)}: falta atribuir no lugar de ${t.nome}</span>`}</span>
+      ${podeEditar&&html`<${BtnMini} perigo label=${"Desfazer troca de "+t.nome} onClick=${()=>del(t.id)}>Desfazer</${BtnMini}>`}
+    </div>`})}
+  </${Card}>`;
+}
+function Sugestao({calc,rot,mudar,podeEditar}){
+  const {res}=calc;if(!calc.abertos)return null;
+  const aplicar=()=>mudar(x=>{const novas=[];res.cadeias.forEach(c=>c.passos.forEach(p=>{const id="t"+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+    if(p.extra){const xx=calc.pulmao.find(z=>z.id===p.pessoa.id);const pes=xx&&xx.pessoaId?calc.todos.find(t=>t.id===xx.pessoaId):null;novas.push({id,pulmaoId:p.pessoa.id,pessoaId:xx&&xx.pessoaId||null,nome:p.pessoa.nome,cpf:pes?pes.cpf||"":"",de:null,para:p.para,origem:p.origem,feito:false})}
+    else novas.push({id,pessoaId:p.pessoa.id,nome:p.pessoa.nome,cpf:p.pessoa.cpf||"",de:p.de,para:p.para,feito:false})}));return {...x,trocas:[...(x.trocas||[]),...novas]}});
+  return html`<${Card} title="Sugestão automática" right=${res.cadeias.length&&podeEditar?html`<${BtnMini} onClick=${aplicar}>Aplicar sugestão</${BtnMini}>`:null}>
+    <div class="text-[12px] text-muted mb-2">O painel acha o jeito com menos trocas, em cadeia se precisar. "Aplicar" lança tudo em Trocas do dia.</div>
+    <div class="grid gap-3">${res.cadeias.map((c,i)=>{let ant=motAnt(c.furo.mot);return html`<div key=${i} class="rounded-2xl border border-line p-3.5" style=${{background:"var(--wash)"}}>
+      <div class="text-[11px] uppercase tracking-[.14em] text-muted font-semibold mb-2">Cadeia ${i+1} · ${c.passos.length} movimentação(ões)</div>
+      <div class="flex gap-2 items-start text-[13px] py-1"><span class="w-5 text-center" style=${{color:"var(--red)"}}>●</span><span class="min-w-0"><b>${motNome(c.furo.mot)}</b> <span class="text-muted">— ${rot(c.furo.no)} —</span> <${Pill} tom=${motTom(c.furo.mot)}>${motTag(c.furo.mot)}</${Pill}></span></div>
+      ${c.passos.map((p,j)=>{const linha=html`<div key=${j} class="flex gap-2 items-start text-[13px] py-1"><span class="w-5 text-center" style=${{color:p.extra||p.excedente?"var(--green)":"var(--accent)"}}>↑</span>
+        <span class="min-w-0"><b>${p.pessoa.nome}</b> <span class="text-muted">— ${passoDe(p,rot)}</span> → assume <b>${ant}</b></span></div>`;ant="posição de "+p.pessoa.nome;return linha})}
+      <div class="text-[12px] font-semibold mt-1.5" style=${{color:"var(--green)"}}>✓ Cadeia fechada</div>
+    </div>`})}</div>
+    ${calc.sem>0&&html`<div class="rounded-2xl px-4 py-3 mt-3 text-[13px] font-semibold" style=${{background:fundoTom("red"),color:corTom("red")}}>⚠ QUADRO NÃO FECHADO — permanece${calc.sem>1?"m":""} ${calc.sem} posição(ões) sem cobertura<div class="font-normal mt-1">${res.semCobertura.map(x=>html`<div key=${x.no}>${rot(x.no)}: ${x.faltam} — ${x.motivos.map(motNome).join(", ")||"vaga em aberto"}</div>`)}</div><div class="font-normal mt-1 opacity-80">Ninguém sobrando ou do pulmão consegue fechar pelas regras de horário. Ponha alguém no pulmão num horário compatível.</div></div>`}
+  </${Card}>`;
+}
+
+function Panorama({escalas,saidas,pode,data,diaAtual,setData,versao}){
+  const dias=useMemo(()=>{const h=hojeISO();return Array.from({length:8},(_,i)=>addDias(h,i-7))},[versao]);
+  const [salvos,setSalvos]=useState({});
+  useEffect(()=>{let vivo=true;(async()=>{try{const c=await nuvem();const {data:rows,error}=await c.from(TABELA).select("state_key,payload").in("state_key",dias.map(d=>K_DIA+d));
+    if(!error&&vivo){const m={};(rows||[]).forEach(r=>m[r.state_key.slice(K_DIA.length)]=r.payload);setSalvos(m)}}catch(e){}})();return()=>{vivo=false}},[dias,versao]);
+  useEffect(()=>{if(diaAtual)setSalvos(m=>m[data]===diaAtual?m:{...m,[data]:diaAtual})},[diaAtual,data]);
+  const linhas=useMemo(()=>dias.map(d=>{const st=d===data?diaAtual:salvos[d];const c=calcularDia(escalas,st,saidas,pode);return {d,conf:!!st,c,pz:prazoDe(d)}}),[dias,salvos,data,diaAtual,escalas,saidas,pode]);
+  const alerta=linhas.filter(l=>l.pz.r>=0&&(l.c.abertos>0||l.c.pend>0||!l.conf));
+  return html`<${Card} className="md:col-span-12" title="Furos dos últimos dias" right=${html`<span class="text-[12px] text-muted">prazo de ${PRAZO_DIAS} dias para atribuir</span>`}>
+    <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">${linhas.map(l=>{
+      const {c}=l;const st=!l.conf?{tom:"muted",t:"não conferido"}:c.abertos>0?{tom:"red",t:`${c.abertos} furo(s) aberto(s)`}:c.pend>0?{tom:"amber",t:`${c.pend} p/ atribuir`}:{tom:"green",t:c.trocas.length?"coberto":"sem furos"};
+      const sel=l.d===data;
+      return html`<button type="button" key=${l.d} onClick=${()=>setData(l.d)} aria-pressed=${sel?"true":"false"} class="text-left rounded-2xl border p-3 transition-colors" style=${{borderColor:sel?"var(--accent)":"var(--line)",background:sel?fundoTom("accent"):"var(--wash)"}}>
+        <div class="flex items-baseline justify-between gap-1"><span class="font-display text-[15px] tnum">${dm(l.d)}</span><span class="text-[11px] text-muted">${l.d===hojeISO()?"hoje":semanaDe(l.d)}</span></div>
+        <div class="mt-1.5"><${Pill} tom=${st.tom}>${st.t}</${Pill}></div>
+        <div class="text-[11px] text-muted mt-1.5 tnum">${c.vagasFixas} a menos · ${c.abs} ABS · ${c.trocas.length} troca(s)</div>
+        <div class="text-[11px] mt-0.5 font-medium" style=${{color:corTom(l.pz.tom)}}>${l.pz.r<0?"prazo encerrado":l.pz.r===0?"último dia":"até "+dm(l.pz.ate)}</div>
+      </button>`})}</div>
+    ${alerta.length>0&&html`<div class="text-[12px] text-muted mt-3">Ainda dá tempo de resolver: ${alerta.map(l=>dm(l.d)).join(", ")}. Toque no dia para lançar e ver as opções.</div>`}
+    <div class="text-[11px] text-muted mt-1">Dias "não conferidos" mostram só as escalas com gente a menos (desligamento, mudança de cargo…), que existem todo dia. O cálculo usa o HC atual.</div>
+  </${Card}>`;
+}
+
+function CoberturaView({escalas,historico,versao,regrasNuvem,podeEditar,toast,carregando}){
+  const [data,setData]=useState(hojeISO);const [dia,setDia]=useState(DIA_VAZIO);const [ok,setOk]=useState(false);
+  const sujo=useRef(false);const tm=useRef(null);
+  useEffect(()=>{let vivo=true;if(sujo.current)return;
+    lerChave(K_DIA+data).then(p=>{if(vivo&&!sujo.current){setDia({...DIA_VAZIO,...(p||{})});setOk(true)}}).catch(()=>{if(vivo)setOk(true)});
+    return()=>{vivo=false}},[data,versao]);
+  const mudar=fn=>{setDia(d=>{const n=fn(d);sujo.current=true;clearTimeout(tm.current);
+    tm.current=setTimeout(async()=>{try{await salvarChave(K_DIA+data,{...n,em:new Date().toISOString()})}catch(e){toast("Não foi possível salvar o quadro do dia.",true)}finally{sujo.current=false}},700);return n})};
+  const trocarData=v=>{if(!v||v===data)return;clearTimeout(tm.current);sujo.current=false;setOk(false);setDia(DIA_VAZIO);setData(v)};
+  const [regras,setRegras]=useState(regrasNuvem||{});useEffect(()=>{setRegras(regrasNuvem||{})},[regrasNuvem]);
+  const gravaRegras=n=>{setRegras(n);salvarChave(K_REGRAS,{permitido:n,em:new Date().toISOString()}).catch(()=>toast("Não foi possível salvar as regras.",true))};
+  const pode=useCallback((o,d)=>regras[o+">"+d]??regraPadrao(o,d),[regras]);pode0=pode;
+  const saidas=useMemo(()=>mapaSaidas(escalas,historico),[escalas,historico]);
+  const calc=useMemo(()=>calcularDia(escalas,dia,saidas,pode),[escalas,dia,saidas,pode]);
+  const {nos,horas,res,pulmao,pulmaoTodo,presentesIds,todos,vagasFixas,abs,byId}=calc;
+  const rot=id=>byId[id]?`${byId[id].label} · ${byId[id].g.code}`:id;
+  const uso={};calc.trocas.forEach(t=>{if(t.pulmaoId)uso[t.pulmaoId]="lançado na "+(byId[t.para]?byId[t.para].g.code:"?")});
+  res.cadeias.forEach(c=>{const ult=c.passos[c.passos.length-1];if(ult&&ult.extra&&!uso[ult.pessoa.id])uso[ult.pessoa.id]="sugerido → "+rot(ult.para)});
+  const porHora={};nos.forEach(n=>(porHora[n.hora]??=[]).push(n));
+  const [verQuadro,setVerQuadro]=useState(false);
+  if(carregando)return html`<div class="grid gap-4"><div class="glass rounded-3xl p-6 h-48"><div class="sk h-full w-full"></div></div></div>`;
+  if(!nos.length)return html`<${Card} title="Cobertura"><div class="text-[14px] text-muted">Ainda não tem escalas na nuvem. Importe os dados em ⚙ Configurações.</div></${Card}>`;
+  const stat=(v,l,tom)=>html`<div class="min-w-0"><div class="font-display text-2xl sm:text-3xl tnum" style=${{color:tom?corTom(tom):"var(--ink)"}}>${v}</div><div class="text-muted text-xs mt-1">${l}</div></div>`;
+  const pz=prazoDe(data);
+  return html`<${motion.div} key="cob" initial=${{opacity:0,y:8}} animate=${{opacity:1,y:0}} exit=${{opacity:0}} transition=${{duration:.2}} class="grid grid-cols-1 md:grid-cols-12 gap-4 items-start">
+    <${Panorama} escalas=${escalas} saidas=${saidas} pode=${pode} data=${data} diaAtual=${ok?dia:null} setData=${trocarData} versao=${versao}/>
+    ${!ok?html`<div class="md:col-span-12 glass rounded-3xl p-6 h-48"><div class="sk h-full w-full"></div></div>`:html`
+    <${Card} className="md:col-span-12">
+      <div class="flex items-start justify-between gap-4 flex-wrap">
+        <div class="min-w-0">
+          <div class="text-[11px] uppercase tracking-[.16em] text-muted font-semibold">Cobertura · ${semanaDe(data)} ${fmtData(data)}</div>
+          <h1 class="font-display text-3xl sm:text-5xl tracking-tight mt-2" style=${{color:calc.abertos?"var(--red)":calc.pend?"var(--amber)":"var(--green)"}}>${calc.abertos?`${calc.abertos} furo${calc.abertos>1?"s":""} em aberto`:calc.pend?"Falta atribuir na Meli":"Quadro fechado"}</h1>
+          <div class="text-[13px] text-muted mt-2 max-w-xl">Lance os ABS e as trocas do dia. Para cada furo, o painel mostra quem pode cobrir num horário compatível.</div>
+          <div class="mt-2"><${Pill} tom=${pz.tom}>${pz.txt}</${Pill}></div>
+        </div>
+        <label class="text-[11px] text-muted grid gap-1">Dia<input id="cob-data" type="date" value=${data} onChange=${e=>trocarData(e.target.value)} class=${campo+" !w-auto tnum"}/></label>
+      </div>
+      <div class="grid grid-cols-3 sm:grid-cols-6 gap-4 mt-6">
+        ${stat(vagasFixas,"a menos (fixo)",vagasFixas?"red":null)}${stat(abs,"ABS do dia",abs?"red":null)}${stat(calc.trocas.length,"trocas","accent")}${stat(calc.abertos,"furos abertos",calc.abertos?"red":"green")}${stat(calc.pend,"p/ atribuir",calc.pend?"amber":null)}${stat(pulmao.length,"livres no pulmão","amber")}
+      </div>
+    </${Card}>
+    <div class="md:col-span-6 grid gap-4 min-w-0">
+      <${Lancar} calc=${calc} mudar=${mudar} podeEditar=${podeEditar}/>
+      <${Pulmao} dia=${dia} mudar=${mudar} horas=${horas} podeEditar=${podeEditar} todos=${todos} pode=${pode} uso=${uso} presentesIds=${presentesIds}/>
+      <${Card} title=${"Quadro completo · "+fmtData(data)} right=${html`<button type="button" onClick=${()=>setVerQuadro(!verQuadro)} aria-expanded=${verQuadro?"true":"false"} class="text-[12px] text-muted hover:text-ink">${verQuadro?"Fechar ▴":"Abrir ▾"}</button>`}>
+        <div class="text-[12px] text-muted">Escala por escala: ajustar o "precisa", marcar falta pelo nome, escala de folga e quem veio na folga.</div>
+        ${verQuadro&&horas.map(h=>html`<div key=${h} class="mt-3">
+          <div class="font-display text-[13px] mb-1" style=${{color:"var(--accent)"}}>${h}h</div>
+          ${porHora[h].map(n=>html`<${LinhaQuadro} key=${n.id} n=${n} dia=${dia} mudar=${mudar} podeEditar=${podeEditar}/>`)}
+        </div>`)}
+      </${Card}>
+    </div>
+    <div class="md:col-span-6 grid gap-4 min-w-0">
+      <${FurosAbertos} calc=${calc} pode=${pode} mudar=${mudar} podeEditar=${podeEditar}/>
+      <${Trocas} calc=${calc} data=${data} mudar=${mudar} podeEditar=${podeEditar} toast=${toast} rot=${rot}/>
+      <${Sugestao} calc=${calc} rot=${rot} mudar=${mudar} podeEditar=${podeEditar}/>
+      <${Regras} horas=${horas} regras=${regras} podeEditar=${podeEditar} setRegra=${(o,d,v)=>gravaRegras({...regras,[o+">"+d]:v})} restaurar=${()=>gravaRegras({})}/>
+    </div>`}
+  </${motion.div}>`;
+}
+
+function HistoricoView({historico,escalas,podeEditar,ops}){
+  const rot=h=>h.tipo==="Removido"?(h.motivo||"Removido"):h.tipo;
+  const [fil,setFil]=useState("todos");const [busy,setBusy]=useState(null);
+  const cont={};historico.forEach(h=>{const r=rot(h);cont[r]=(cont[r]||0)+1});
+  const chaves=["todos",...Object.keys(cont).sort()];
+  const lista=historico.filter(h=>fil==="todos"||rot(h)===fil);
+  const podeDesfazer=new Set();const visto=new Set();
+  historico.forEach(h=>{const k=h.cpf||h.nome;if(visto.has(k))return;visto.add(k);if(h.tipo==="Removido"&&h.pessoa)podeDesfazer.add(h._id)});
+  const dia=iso=>{const d=new Date(iso);return isNaN(d)?"Sem data":d.toLocaleDateString("pt-BR",{weekday:"long",day:"2-digit",month:"2-digit",year:"numeric"})};
+  const hora=iso=>{const d=new Date(iso);return isNaN(d)?"":d.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})};
+  let ultimo="";
+  return html`<${motion.div} key="hist" initial=${{opacity:0,y:8}} animate=${{opacity:1,y:0}} exit=${{opacity:0}} transition=${{duration:.2}} class="grid grid-cols-1 md:grid-cols-12 gap-4">
+    <${Card} className="md:col-span-12">
+      <div class="text-[11px] uppercase tracking-[.16em] text-muted font-semibold">Histórico</div>
+      <h1 class="font-display text-4xl sm:text-5xl tracking-tight mt-2 mb-5 tnum"><${CountUp} v=${historico.length}/> <span class="text-muted font-sans text-base">mudança(s) registrada(s)</span></h1>
+      ${historico.length>0&&html`<${LayoutGroup} id="hfil"><div class="inline-flex flex-wrap gap-1 p-1 rounded-3xl" style=${{background:"var(--wash)"}}>
+        ${chaves.map(k=>html`<button key=${k} type="button" onClick=${()=>setFil(k)} aria-pressed=${fil===k} class=${"relative px-3.5 py-1.5 rounded-full text-[12px] font-medium "+(fil===k?"text-[var(--on-accent)]":"text-muted hover:text-ink")}>
+          ${fil===k&&html`<${motion.span} layoutId="hpill" class="absolute inset-0 rounded-full" style=${{background:"var(--accent)"}} transition=${spring}/>`}
+          <span class="relative">${k==="todos"?"Tudo":k} · ${k==="todos"?historico.length:cont[k]}</span></button>`)}
+      </div></${LayoutGroup}>`}
+    </${Card}>
+    <${Card} className="md:col-span-12">
+      ${!lista.length?html`<div class="text-[14px] text-muted">${historico.length?"Nada com esse filtro.":"Nenhuma mudança registrada ainda. Quando você editar, trocar de escala, adicionar ou tirar alguém, aparece aqui."}</div>`:
+      lista.map(h=>{const d=dia(h.em);const cab=d!==ultimo;ultimo=d;const r=rot(h);const tom=TOM[r]||"muted";
+        const onde=h.tipo==="Mudou de escala"?`${h.escala} → ${h.para}`:(/^(\d|T\d)/.test(h.escala||"")||h.escala==="Sem código"?"Escala "+h.escala:h.escala||"");
+        return html`<${React.Fragment} key=${h._id}>
+          ${cab&&html`<div class="text-[11px] uppercase tracking-[.14em] text-muted font-semibold pt-4 pb-2 first:pt-0">${d}</div>`}
+          <div class="flex gap-3 py-3 border-t border-[var(--sep)] items-start flex-wrap sm:flex-nowrap">
+            <span class="font-mono text-[12px] text-muted tnum w-12 shrink-0 pt-0.5">${hora(h.em)}</span>
+            <div class="min-w-0 flex-1">
+              <div class="text-[14px] font-medium"><span class="mr-2"><${Pill} tom=${tom}>${r}</${Pill}></span>${h.nome}</div>
+              <div class="text-[12px] text-muted mt-1 break-words">${onde}${h.cpf?" · "+h.cpf:""}</div>
+              ${h.detalhe&&html`<div class="text-[12px] text-muted mt-0.5 break-words">${h.detalhe}</div>`}
+              ${h.nota&&html`<div class="text-[12px] mt-0.5 break-words" style=${{color:"var(--ink)",opacity:.8}}>“${h.nota}”</div>`}
+            </div>
+            ${podeEditar&&podeDesfazer.has(h._id)&&html`<div class="pl-[60px] sm:pl-0"><${BtnMini} disabled=${busy===h._id} onClick=${async()=>{setBusy(h._id);try{await ops.desfazer(h)}finally{setBusy(null)}}}>${busy===h._id?"Desfazendo…":"Desfazer saída"}</${BtnMini}></div>`}
+          </div>
+        </${React.Fragment}>`})}
+    </${Card}>
+  </${motion.div}>`;
+}
+
+function Config({onClose,escalas,historico,onImportado,toast}){
+  const c0=getCfg();const [url,setUrl]=useState(c0.url);const [key,setKey]=useState(c0.key);
+  const [arq,setArq]=useState(null);const [busy,setBusy]=useState(false);const [msg,setMsg]=useState("");
+  const salvarCfg=()=>{setCfg({url:url.trim(),key:key.trim()});setMsg("Conexão salva. Recarregando os dados…");onImportado()};
+  const exportar=()=>{
+    const dados={app:"kn-escalas",versao:1,exportadoEm:new Date().toISOString(),escalas:{},historico:historico.map(({_id,...h})=>({id:_id,...h}))};
+    escalas.forEach(({_id,...g})=>dados.escalas[_id]=g);
+    const b=new Blob([JSON.stringify(dados,null,1)],{type:"application/json"});const u=URL.createObjectURL(b);
+    const a=document.createElement("a");a.href=u;a.download=`escalas-backup-${new Date().toLocaleDateString("pt-BR").replace(/\//g,"-")}.json`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),4000);
+    setMsg("Backup baixado.")};
+  const escolher=async e=>{const f=e.target.files[0];if(!f)return;setMsg("");
+    try{const d=JSON.parse(await f.text());if(!d||!d.escalas)throw 0;
+      setArq({nome:f.name,dados:d,esc:Object.keys(d.escalas).length,pes:Object.values(d.escalas).reduce((s,g)=>s+(g.pessoas||[]).length,0),hist:(d.historico||[]).length})}
+    catch(_){setArq(null);setMsg("Esse arquivo não é um backup de escalas válido.")}};
+  const importar=async()=>{setBusy(true);setMsg("Importando…");
+    try{await importarBackup(arq.dados);setMsg(`Importado: ${arq.esc} escalas, ${arq.pes} pessoas e ${arq.hist} registros de histórico.`);setArq(null);onImportado();toast("Backup importado.")}
+    catch(e){setMsg("Não foi possível importar: "+(e.message||e))}finally{setBusy(false)}};
+  return html`<${motion.div} class="fixed inset-0 z-[200] flex items-center justify-center p-4" initial=${{opacity:0}} animate=${{opacity:1}} exit=${{opacity:0}} style=${{background:"var(--overlay)"}} onClick=${onClose}>
+    <${motion.div} initial=${{y:16,opacity:0}} animate=${{y:0,opacity:1}} exit=${{y:16,opacity:0}} transition=${spring} onClick=${e=>e.stopPropagation()} role="dialog" aria-label="Configurações"
+      class="glass rounded-3xl p-5 sm:p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto" style=${{background:"var(--modal)"}}>
+      <div class="flex items-center justify-between gap-3 mb-5"><h2 class="font-display text-lg">Configurações</h2><button type="button" onClick=${onClose} aria-label="Fechar" class="w-8 h-8 rounded-full text-muted hover:text-ink" style=${{background:"var(--wash)"}}>✕</button></div>
+      <div class="text-[11px] uppercase tracking-[.16em] text-muted font-semibold mb-2">Backup</div>
+      <div class="text-[13px] text-muted mb-3">Importe o arquivo de dados iniciais na primeira vez. Depois, use o backup para guardar uma cópia.</div>
+      <div class="flex gap-2 flex-wrap mb-3">
+        <label class="text-[13px] font-medium px-4 py-2 rounded-full border border-line cursor-pointer hover:border-[var(--line2)]">Escolher arquivo .json<input type="file" accept=".json,application/json" class="sr-only" onChange=${escolher}/></label>
+        <${BtnSec} onClick=${exportar} disabled=${!escalas.length}>Baixar backup</${BtnSec}>
+      </div>
+      ${arq&&html`<div class="rounded-2xl p-3.5 mb-3 border" style=${{background:"color-mix(in srgb,var(--amber) 8%,transparent)",borderColor:"color-mix(in srgb,var(--amber) 30%,transparent)"}}>
+        <div class="text-[13px]"><b>${arq.nome}</b>: ${arq.esc} escalas, ${arq.pes} pessoas, ${arq.hist} registros de histórico.</div>
+        <div class="text-[12px] mt-1" style=${{color:"var(--amber)"}}>As escalas com o mesmo código na nuvem serão substituídas pelas do arquivo.</div>
+        <div class="flex justify-end gap-2 mt-3"><${BtnSec} onClick=${()=>setArq(null)}>Cancelar</${BtnSec}><${BtnPrim} disabled=${busy} onClick=${importar}>${busy?"Importando…":"Importar e substituir"}</${BtnPrim}></div>
+      </div>`}
+      <div class="text-[11px] uppercase tracking-[.16em] text-muted font-semibold mt-5 mb-2">Conexão com a nuvem (Supabase)</div>
+      <div class="grid gap-2">
+        <input class=${campo+" font-mono text-[12px]"} value=${url} onInput=${e=>setUrl(e.target.value)} placeholder="https://xxxx.supabase.co" aria-label="Endereço do Supabase"/>
+        <input class=${campo+" font-mono text-[12px]"} value=${key} onInput=${e=>setKey(e.target.value)} placeholder="Chave publishable/anon" aria-label="Chave do Supabase"/>
+        <div class="flex justify-end"><${BtnSec} onClick=${salvarCfg}>Salvar conexão</${BtnSec}></div>
+      </div>
+      ${msg&&html`<div class="text-[13px] mt-4" role="status">${msg}</div>`}
+    </${motion.div}>
+  </${motion.div}>`;
+}
+
+function App(){
+  const [view,setViewRaw]=useState(()=>{try{return localStorage.getItem("kn-painel-view")||"escalas"}catch(e){return "escalas"}});
+  const setView=v=>{setViewRaw(v);try{localStorage.setItem("kn-painel-view",v)}catch(e){}window.scrollTo({top:0})};
+  const [dados,setDados]=useState({escalas:[],historico:[]});const [carregando,setCarregando]=useState(true);
+  const [status,setStatus]=useState({ok:null,at:"",busy:false});const [cfg,setCfgOpen]=useState(false);
+  const [tema,setTemaRaw]=useState(()=>document.documentElement.getAttribute("data-tema")==="claro"?"claro":"escuro");
+  const setTema=t=>{setTemaRaw(t);if(t==="claro")document.documentElement.setAttribute("data-tema","claro");else document.documentElement.removeAttribute("data-tema");try{localStorage.setItem("kn-painel-tema",t)}catch(e){}};
+  const [toastMsg,setToast]=useState(null);const [foco,setFoco]=useState(null);const [versao,setVersao]=useState(0);const tt=useRef(null);
+  const toast=(m,erro)=>{setToast({m,erro});clearTimeout(tt.current);tt.current=setTimeout(()=>setToast(null),erro?5000:2400)};
+  const recarregar=useCallback(async()=>{
+    try{const d=await lerTudo();setDados(d);setVersao(v=>v+1);setStatus(s=>({...s,ok:true,at:new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}))}
+    catch(e){console.error(e);setStatus(s=>({...s,ok:false}))}
+    finally{setCarregando(false)}
+  },[]);
+  useEffect(()=>{
+    let alive=true,ch=null,tm=null;
+    const agenda=()=>{clearTimeout(tm);tm=setTimeout(recarregar,300)};
+    (async()=>{await recarregar();
+      try{const d=await lerTudo();const sc=d.escalas.find(x=>x._id==="sem-codigo"&&x.code==="Sem código");
+        if(sc&&!d.escalas.some(x=>x.code==="T3.1")){await alterarEscala("sem-codigo",x=>x.code==="Sem código"?{...x,code:"T3.1"}:x);await registrar({tipo:"Renomeada",nome:"Escala T3.1",escala:"T3.1",detalhe:"nome: Sem código → T3.1"});await recarregar()}}catch(e){}
+      try{const c=await nuvem();if(!alive)return;
+      ch=c.channel("kn-escalas-"+Math.random().toString(36).slice(2,8)).on("postgres_changes",{event:"*",schema:"public",table:TABELA},p=>{const k=(p.new&&p.new.state_key)||(p.old&&p.old.state_key)||"";if(!k||k.startsWith("esc"))agenda()}).subscribe()}catch(e){}})();
+    const iv=setInterval(recarregar,60000);const vis=()=>{if(document.visibilityState==="visible")recarregar()};
+    document.addEventListener("visibilitychange",vis);window.addEventListener("online",recarregar);
+    return()=>{alive=false;clearInterval(iv);clearTimeout(tm);document.removeEventListener("visibilitychange",vis);window.removeEventListener("online",recarregar);try{ch&&sb.removeChannel(ch)}catch(e){}};
+  },[recarregar]);
+  const {escalas,historico}=dados;
+  /* toda gravação: marca "salvando", grava, registra no histórico e relê */
+  const gravar=async(fn,okMsg)=>{setStatus(s=>({...s,busy:true}));
+    try{await fn();if(okMsg)toast(okMsg);await recarregar();return true}
+    catch(e){console.error(e);toast("Não foi possível salvar: "+(e.message||"sem conexão com a nuvem"),true);return false}
+    finally{setStatus(s=>({...s,busy:false}))}};
+  const hist=async ev=>{try{await registrar(ev)}catch(e){toast("A mudança foi salva, mas não entrou no Histórico.",true)}};
+  const ops={
+    salvarPessoa:async(g,antes,f)=>{
+      const nome=f.nome.trim(),cpf=fmtCpf(f.cpf),obs=f.obs.trim(),nota=(f.motivo||"").trim(),d=soDig(cpf);
+      if(!nome){toast("Preencha o nome.",true);return false}
+      if(d&&d.length!==11){toast("O CPF precisa ter 11 números.",true);return false}
+      if(d&&!cpfValido(d)){toast("Esse CPF não é válido. Confira os números.",true);return false}
+      const dono=d&&escalas.find(x=>(x.pessoas||[]).some(p=>soDig(p.cpf)===d&&(!antes||p.id!==antes.id)));
+      if(dono){toast(`Esse CPF já está em ${dono.code}.`,true);return false}
+      const destino=escalas.find(x=>x._id===f.destino)||g;const pessoa={id:antes?antes.id:novoId(),nome,cpf};if(obs)pessoa.obs=obs;
+      if(!antes)return gravar(async()=>{await alterarEscala(destino._id,x=>({...x,pessoas:[...(x.pessoas||[]),pessoa]}));await hist({tipo:"Adicionado",nome,cpf,escala:destino.code,nota})},`${nome} entrou em ${destino.code}.`);
+      const mud=[];if(antes.nome!==nome)mud.push(`nome: ${antes.nome} → ${nome}`);if(antes.cpf!==cpf)mud.push(`CPF: ${antes.cpf||"vazio"} → ${cpf||"vazio"}`);if((antes.obs||"")!==obs)mud.push(`obs.: ${antes.obs||"vazio"} → ${obs||"vazio"}`);
+      if(destino._id!==g._id)return gravar(async()=>{
+        await alterarEscala(destino._id,x=>({...x,pessoas:[...(x.pessoas||[]),pessoa]}));
+        await alterarEscala(g._id,x=>({...x,pessoas:(x.pessoas||[]).filter(p=>p.id!==antes.id)}));
+        await hist({tipo:"Mudou de escala",nome,cpf,escala:g.code,para:destino.code,nota,detalhe:mud.join(" · ")})},`${nome} foi para ${destino.code}.`);
+      if(!mud.length){toast("Nada mudou.");return true}
+      return gravar(async()=>{await alterarEscala(g._id,x=>({...x,pessoas:(x.pessoas||[]).map(p=>p.id===antes.id?pessoa:p)}));await hist({tipo:"Editado",nome,cpf,escala:g.code,nota,detalhe:mud.join(" · ")})},"Alterações salvas.");
+    },
+    tirar:(g,p,motivo,nota)=>gravar(async()=>{await alterarEscala(g._id,x=>({...x,pessoas:(x.pessoas||[]).filter(y=>y.id!==p.id)}));await hist({tipo:"Removido",motivo,nota,nome:p.nome,cpf:p.cpf,escala:g.code,escalaId:g._id,pessoa:p})},`${p.nome} saiu de ${g.code} (${motivo}).`),
+    colar:(g,itens)=>{const novas=itens.map(i=>({id:novoId(),nome:i.nome,cpf:i.cpf}));
+      return gravar(async()=>{await alterarEscala(g._id,x=>({...x,pessoas:[...(x.pessoas||[]),...novas]}));await hist({tipo:"Adicionado em lote",nome:`${novas.length} pessoa(s)`,escala:g.code,detalhe:novas.map(p=>p.nome+(p.cpf?" ("+p.cpf+")":"")).join(" · ")})},`${novas.length} pessoa(s) entraram em ${g.code}.`)},
+    previsto:(g,antes,novo)=>gravar(async()=>{await alterarEscala(g._id,x=>({...x,previsto:novo}));await hist({tipo:"Quantidade ajustada",nome:g.tipo==="cargo"?g.code:"Escala "+g.code,escala:g.code,detalhe:`quantidade prevista: ${antes} → ${novo}`})},`${g.code}: quantidade prevista agora é ${novo}.`),
+    renomear:(g,novo)=>{
+      if(!novo){toast("Escreva o nome da escala.",true);return false}
+      if(novo===g.code)return true;
+      if(escalas.some(x=>x._id!==g._id&&norm(x.code)===norm(novo))){toast(`Já existe uma escala chamada ${novo}.`,true);return false}
+      return gravar(async()=>{await alterarEscala(g._id,x=>({...x,code:novo}));await hist({tipo:"Renomeada",nome:"Escala "+novo,escala:novo,detalhe:`nome: ${g.code} → ${novo}`})},`Escala renomeada para ${novo}.`)},
+    desfazer:h=>{const g=escalas.find(x=>x._id===h.escalaId)||escalas.find(x=>x.code===h.escala);
+      if(!g){toast("A escala original não existe mais.",true);return false}
+      const d=soDig(h.pessoa.cpf);if(d&&escalas.some(x=>(x.pessoas||[]).some(p=>soDig(p.cpf)===d))){toast(`${h.nome} já está em uma escala.`,true);return false}
+      return gravar(async()=>{await alterarEscala(g._id,x=>({...x,pessoas:[...(x.pessoas||[]),h.pessoa]}));await hist({tipo:"Restaurado",nome:h.nome,cpf:h.cpf,escala:g.code,nota:`Saída por ${h.motivo} desfeita`})},`${h.nome} voltou para ${g.code}.`)},
+  };
+  const podeEditar=status.ok!==false;
+  return html`<div>
+    <${Nav} tema=${tema} setTema=${setTema} view=${view} setView=${setView} status=${status} onSync=${recarregar} onCfg=${()=>setCfgOpen(true)}/>
+    <main class="max-w-7xl mx-auto px-4 pt-24 pb-16">
+      ${status.ok===false&&!carregando&&html`<div class="rounded-2xl px-4 py-3 text-sm mb-4" style=${{background:"color-mix(in srgb,var(--red) 10%,transparent)",color:"var(--red)"}}>Sem conexão com a nuvem. Confira a internet ou a conexão em ⚙ Configurações. As escalas voltam a aparecer quando a conexão voltar.</div>`}
+      <${AnimatePresence} mode="wait">
+        ${view==="historico"?html`<${HistoricoView} key="h" historico=${historico} escalas=${escalas} podeEditar=${podeEditar} ops=${ops}/>`
+          :view==="cobertura"?html`<${CoberturaView} key="c" escalas=${escalas} historico=${historico} versao=${versao} regrasNuvem=${dados.regras} podeEditar=${podeEditar} toast=${toast} carregando=${carregando}/>`
+          :view==="antigas"?html`<${AntigasView} key="a" escalas=${escalas} carregando=${carregando} ordem=${dados.ordemHorarios} onSalvarOrdem=${cols=>gravar(()=>salvarOrdemHorarios(cols),"Ordem dos horários salva para todos.")} irPara=${id=>{setFoco({id,t:Date.now()});setViewRaw("escalas");try{localStorage.setItem("kn-painel-view","escalas")}catch(e){}}}/>`
+          :html`<${EscalasView} key="e" escalas=${escalas} podeEditar=${podeEditar} ops=${ops} carregando=${carregando} foco=${foco} onCfg=${()=>setCfgOpen(true)}/>`}
+      </${AnimatePresence}>
+    </main>
+    ${ReactDOM.createPortal(html`<${AnimatePresence}>${cfg&&html`<${Config} key="cfg" onClose=${()=>setCfgOpen(false)} escalas=${escalas} historico=${historico} onImportado=${recarregar} toast=${toast}/>`}</${AnimatePresence}>`,document.body)}
+    ${ReactDOM.createPortal(html`<${AnimatePresence}>${toastMsg&&html`<${motion.div} key=${toastMsg.m} role="status" initial=${{y:20,opacity:0}} animate=${{y:0,opacity:1}} exit=${{y:20,opacity:0}} transition=${spring}
+      class="fixed left-1/2 z-[300] px-4 py-2.5 rounded-2xl text-[14px] font-medium max-w-[calc(100%-32px)]"
+      style=${{x:"-50%",bottom:"calc(16px + env(safe-area-inset-bottom,0px))",background:toastMsg.erro?"var(--red)":"var(--ink)",color:"var(--bg)",boxShadow:"0 8px 30px rgba(0,0,0,.4)"}}>${toastMsg.m}</${motion.div}>`}</${AnimatePresence}>`,document.body)}
+  </div>`;
+}
+ReactDOM.createRoot(document.getElementById("root")).render(html`<${App}/>`);
+</script>
+</body></html>
