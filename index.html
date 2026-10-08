@@ -1180,18 +1180,30 @@ function aplicarPlanilha(dia,r,escalas){
 /* ---- QUADRO · DIARISTAS: o que falta no HC (Delta da HC_PLAN) é coberto primeiro por diarista ---- */
 /* ============ DIARISTAS (banco do KN Diaristas Control) ============ */
 const K_DZ="escpainel:diaristas";
+const DZ_PADRAO={url:"https://cnpcsovjomonctbggbac.supabase.co",key:"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNucGNzb3Zqb21vbmN0YmdnYmFjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY0NjE4NzUsImV4cCI6MjEwMjAzNzg3NX0.lpumXh7HmzmhUcBqNSAhaR3S7Cd6TFg5sivWybjsra4",tabela:"diaristas",historico:"historico_diarias"};
+const cfgDz=async()=>{try{const c=await lerChave(K_DZ);if(c&&c.key)return {...DZ_PADRAO,...c}}catch(e){}return DZ_PADRAO};
 let sbDz=null,sbDzId="";
 async function nuvemDz(cfg){await nuvem();const id=cfg.url+"|"+cfg.key;
   if(!sbDz||sbDzId!==id){sbDz=window.supabase.createClient(cfg.url.trim(),cfg.key.trim(),{auth:{persistSession:false,autoRefreshToken:false,storageKey:"kn-painel-dz"}});sbDzId=id}return sbDz}
 const pick=(r,...ks)=>{for(const k of ks){if(r[k]!=null&&r[k]!=="")return r[k]}return ""};
-const normDz=r=>({nome:String(pick(r,"nome","nome_completo","name")).trim(),cpf:fmtCpf(String(pick(r,"cpf"))),groot:String(pick(r,"groot_id","grootid","groot","matricula","id_groot")).trim(),
+const normDz=r=>({id:String(pick(r,"id","uuid")),ref:String(pick(r,"diarista_id","id_diarista","diarista")),nome:String(pick(r,"nome","nome_completo","name")).trim(),cpf:fmtCpf(String(pick(r,"cpf"))),groot:String(pick(r,"groot_id","grootid","groot","matricula","id_groot")).trim(),
   empresa:String(pick(r,"empresa","company")).trim(),turno:String(pick(r,"turno")).trim(),horario:String(pick(r,"horario","hora","hora_entrada","entrada")).trim().slice(0,5),cargo:String(pick(r,"cargo")).trim()});
 async function lerDiaristas(cfg,iso){
   const c=await nuvemDz(cfg);const tb=(cfg.tabela||"diaristas").trim(),th=(cfg.historico||"historico_diarias").trim();
   const b=await c.from(tb).select("*").limit(5000);if(b.error)throw new Error("tabela "+tb+": "+b.error.message);
-  let d=null,erroD="";for(const col of ["data","data_lancamento","dia","date"]){const r=await c.from(th).select("*").eq(col,iso).limit(2000);if(!r.error){d=r.data;break}erroD=r.error.message}
-  const vistos=new Set();const dia=(d||[]).map(normDz).filter(x=>{const k=dg(x.cpf)||norm(x.nome);if(!x.nome||vistos.has(k))return false;vistos.add(k);return true});
-  return {banco:(b.data||[]).map(normDz).filter(x=>x.nome),dia,ok:true,erroDia:d?"":"lançamentos do dia: "+erroD};
+  const banco=(b.data||[]).map(normDz);
+  const amanha=addDias(iso,1);let d=null,erroD="",colunas=[];
+  for(const col of ["data","data_lancamento","dia","date","data_diaria","created_at"]){
+    let r=await c.from(th).select("*").eq(col,iso).limit(2000);
+    if(!r.error&&!(r.data||[]).length)r=await c.from(th).select("*").gte(col,iso).lt(col,amanha).limit(2000);
+    if(!r.error){d=r.data;if(d.length)break}else erroD=r.error.message}
+  if(!d||!d.length){const x=await c.from(th).select("*").limit(1);if(!x.error&&x.data&&x.data[0])colunas=Object.keys(x.data[0])}
+  else colunas=Object.keys(d[0]);
+  const porId={};banco.forEach(x=>{if(x.id)porId[x.id]=x});
+  const vistos=new Set();
+  const dia=(d||[]).map(r=>{const x=normDz(r);const base=porId[x.ref]||(!x.nome&&porId[x.id])||null;return base?{...base,...Object.fromEntries(Object.entries(x).filter(([,v])=>v)),nome:x.nome||base.nome}:x})
+    .filter(x=>{const k=dg(x.cpf)||norm(x.nome);if(!x.nome||vistos.has(k))return false;vistos.add(k);return true});
+  return {banco:banco.filter(x=>x.nome),dia,ok:true,colunas,erroDia:d?"":"lançamentos do dia: "+erroD};
 }
 const minDe=h=>{const m=String(h||"").match(/(\d{1,2}):(\d{2})/);return m?(+m[1])*60+(+m[2]):null};
 function acharDiarista(dz,cpf,nome){if(!dz)return null;const d=dg(cpf),n=norm(nome).trim();
@@ -1205,10 +1217,10 @@ const rotDz=x=>[x.empresa,x.turno,x.horario?"entrada "+x.horario:"",x.groot?"Gro
 
 function CfgDiaristas(){
   const [f,setF]=useState({url:"https://cnpcsovjomonctbggbac.supabase.co",key:"",tabela:"diaristas",historico:"historico_diarias"});const [msg,setMsg]=useState("");const [busy,setBusy]=useState(false);
-  useEffect(()=>{lerChave(K_DZ).then(c=>{if(c)setF(x=>({...x,...c}))}).catch(()=>{})},[]);
+  useEffect(()=>{cfgDz().then(c=>setF(x=>({...x,...c}))).catch(()=>{})},[]);
   const set=k=>e=>{const v=e.target.value;setF(x=>({...x,[k]:v}))};
   const salvar=async()=>{setBusy(true);setMsg("");try{await salvarChave(K_DZ,{...f,em:new Date().toISOString()});
-      if(f.key.trim()){setMsg("Salvo. Testando…");const r=await lerDiaristas(f,hojeISO());setMsg(`✓ Funcionando: ${r.banco.length} diarista(s) no banco · ${r.dia.length} lançado(s) hoje${r.erroDia?" · ⚠ "+r.erroDia:""}`)}else setMsg("Salvo.")}
+      if(f.key.trim()){setMsg("Salvo. Testando…");const r=await lerDiaristas(f,hojeISO());setMsg(`✓ Funcionando: ${r.banco.length} diarista(s) no banco · ${r.dia.length} lançado(s) hoje${r.erroDia?" · ⚠ "+r.erroDia:""}${!r.dia.length&&r.colunas.length?" · colunas dos lançamentos: "+r.colunas.join(", "):""}`)}else setMsg("Salvo.")}
     catch(e){setMsg("Salvo, mas o teste falhou: "+(e.message||e))}finally{setBusy(false)}};
   return html`<div class="text-[11px] uppercase tracking-[.16em] text-muted font-semibold mt-5 mb-2">Banco de diaristas (KN Diaristas Control)</div>
     <div class="text-[12px] text-muted mb-2">O mesmo Supabase do Controle de Diaristas. Cole a chave publishable/anon que está no app de diaristas.</div>
@@ -1299,7 +1311,7 @@ function CoberturaView({escalas,historico,versao,regrasNuvem,podeEditar,toast,ca
   const [verQuadro,setVerQuadro]=useState(false);const [bump,setBump]=useState(0);
   const [puxando,setPuxando]=useState(false);const tentados=useRef(new Set());
   const [dz,setDz]=useState(null);
-  useEffect(()=>{let vivo=true;lerChave(K_DZ).then(c=>{if(!c||!c.key){if(vivo)setDz(null);return}
+  useEffect(()=>{let vivo=true;cfgDz().then(c=>{if(!c||!c.key){if(vivo)setDz(null);return}
       return lerDiaristas(c,data).then(r=>{if(vivo)setDz(r)}).catch(e=>{if(vivo)setDz({ok:false,erro:e.message||String(e),banco:[],dia:[]})})}).catch(()=>{});
     return()=>{vivo=false}},[data,versao]);
   calc.dz=dz;
