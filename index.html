@@ -179,7 +179,7 @@ function resolverCobertura(nos,extras,pode){
 
 /* ============ REGRAS ============ */
 const MOTIVOS_SAIDA=["Demissão","Mudança de cargo","INSS","Pediu desligamento","Desistiu","Afastamento","Férias","Outro"];
-const TOM={"Demissão":"red","Pediu desligamento":"red","Desistiu":"red","INSS":"amber","Afastamento":"amber","Férias":"amber","Mudou de escala":"accent","Mudança de cargo":"amber","ABS lançado":"red","ABS ajustado":"red","Falta marcada":"red","Falta desmarcada":"muted","Escala de folga":"amber","Folga desmarcada":"muted","Veio na folga":"amber","Pulmão: entrou":"amber","Pulmão: saiu":"muted","Troca lançada":"accent","Troca desfeita":"muted","Atribuído na Meli":"green","Atribuição desmarcada":"muted","Sugestão aplicada":"accent","Precisa ajustado":"accent","Adicionado":"accent","Adicionado em lote":"accent","Restaurado":"green","Renomeada":"accent"};
+const TOM={"Demissão":"red","Pediu desligamento":"red","Desistiu":"red","INSS":"amber","Afastamento":"amber","Férias":"amber","Mudou de escala":"accent","Mudança de cargo":"amber","ABS lançado":"red","ABS ajustado":"red","Falta marcada":"red","Falta desmarcada":"muted","Escala de folga":"amber","Folga desmarcada":"muted","Veio na folga":"amber","Pulmão: entrou":"amber","Pulmão: saiu":"muted","Troca lançada":"accent","Troca desfeita":"muted","Atribuído na Meli":"green","Atribuição desmarcada":"muted","Sugestão aplicada":"accent","Precisa ajustado":"accent","Adicionado":"accent","Adicionado em lote":"accent","Restaurado":"green","Renomeada":"accent","Pendências importadas":"accent","Planilha puxada":"green"};
 const norm=s=>(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase();
 const soDig=s=>(s||"").replace(/\D/g,"");
 const fmtCpf=s=>{const d=soDig(s);return d.length===11?d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/,"$1.$2.$3-$4"):(s||"").trim()};
@@ -673,9 +673,10 @@ function calcularDia(escalas,dia,saidas,pode){
   const res=resolverCobertura(nos.filter(n=>!n.folga),pulmao,pode);
   const byId=Object.fromEntries(nos.map(n=>[n.id,n]));
   const pend=trocas.filter(t=>!t.feito).length;
+  const pendMeli=(dia.pend||[]).filter(p=>p.propria?!p.feito:!(p.trocaId&&trocas.some(t=>t.id===p.trocaId))).length;
   const abertos=nos.reduce((s,n)=>s+n.falta,0);
   const sem=res.semCobertura.reduce((s,x)=>s+x.faltam,0);
-  return {dia,nos,horas,presentesIds,todos,pulmao,pulmaoTodo,res,byId,trocas,pend,abertos,sem,
+  return {dia,nos,horas,presentesIds,todos,pulmao,pulmaoTodo,res,byId,trocas,pend,pendMeli,abertos,sem,
     vagasFixas:nos.reduce((s,n)=>s+(n.folga?0:n.vagaFixa),0),abs:nos.reduce((s,n)=>s+n.abs,0)};
 }
 /* opções para tapar o furo de uma escala: pulmão e sobras não abrem furo; puxar de escala completa abre */
@@ -725,7 +726,7 @@ function Lancar({calc,mudar,podeEditar,log=()=>{}}){
     mudar(x=>({...x,trocas:[...(x.trocas||[]),{id:"t"+Date.now().toString(36),pessoaId:sel.id,nome:sel.nome,cpf:sel.cpf||"",de:sel.gid,para,feito:false}]}));setQ("");setSel(null);setPara("")};
   const sub=t=>html`<div class="text-[11px] uppercase tracking-[.14em] text-muted font-semibold mt-5 mb-2 first:mt-0">${t}</div>`;
   return html`<${Card} title="Lançar o dia">
-    ${sub("1 · Faltas (ABS) por escala")}
+    ${sub("1 · Faltas (ABS) só pela quantidade, sem nome")}
     ${podeEditar&&html`<div class="flex gap-2 flex-wrap items-center mb-2">
       <select id="abs-escala" aria-label="Escala com falta" class=${campo+" !w-auto flex-1 min-w-[180px]"} value=${gAbs} onChange=${e=>setGAbs(e.target.value)}><option value="">Escolha a escala…</option>${opc}</select>
       <span class="inline-flex items-center rounded-full border border-line text-[13px]"><button type="button" aria-label="Menos" onClick=${()=>setQAbs(v=>Math.max(1,v-1))} class="w-8 h-9 font-bold" style=${{color:"var(--accent)"}}>−</button><b class="tnum min-w-[22px] text-center">${qAbs}</b><button type="button" aria-label="Mais" onClick=${()=>setQAbs(v=>v+1)} class="w-8 h-9 font-bold" style=${{color:"var(--accent)"}}>+</button></span>
@@ -789,7 +790,9 @@ function Trocas({calc,data,mudar,podeEditar,toast,rot,log=()=>{}}){
   const {trocas,byId}=calc;const pz=prazoDe(data);const nm=id=>byId[id]?byId[id].g.code:"?";
   if(!trocas.length)return null;
   const set=(id,f)=>mudar(x=>({...x,trocas:(x.trocas||[]).map(t=>t.id===id?f(t):t)}));
-  const del=id=>mudar(x=>({...x,trocas:(x.trocas||[]).filter(t=>t.id!==id)}));
+  /* desfazer uma troca que faz parte de uma cadeia de ABS desfaz também os passos seguintes dela */
+  const del=id=>mudar(x=>{const cortar=new Set([id]);const cad=(x.cadeias||[]).map(c=>{const i=(c.trocas||[]).indexOf(id);if(i<0)return c;c.trocas.slice(i).forEach(z=>cortar.add(z));return {...c,trocas:c.trocas.slice(0,i)}});
+    return {...x,cadeias:cad,trocas:(x.trocas||[]).filter(t=>!cortar.has(t.id))}});
   const copiar=async()=>{try{await navigator.clipboard.writeText(textoCobertura(data,calc,rot));toast("Copiado.")}catch(e){toast("Não deu para copiar aqui.",true)}};
   return html`<${Card} title="Trocas do dia · atribuir na Meli" right=${html`<${BtnMini} onClick=${copiar}>Copiar</${BtnMini}>`}>
     <div class="flex items-center gap-2 flex-wrap mb-2"><${Pill} tom=${pz.tom}>${pz.txt}</${Pill}><span class="text-[12px] text-muted">${calc.pend} de ${trocas.length} para atribuir</span></div>
@@ -828,19 +831,447 @@ function Panorama({escalas,saidas,pode,data,diaAtual,setData,versao}){
     if(!error&&vivo){const m={};(rows||[]).forEach(r=>m[r.state_key.slice(K_DIA.length)]=r.payload);setSalvos(m)}}catch(e){}})();return()=>{vivo=false}},[dias,versao]);
   useEffect(()=>{if(diaAtual)setSalvos(m=>m[data]===diaAtual?m:{...m,[data]:diaAtual})},[diaAtual,data]);
   const linhas=useMemo(()=>dias.map(d=>{const st=d===data?diaAtual:salvos[d];const c=calcularDia(escalas,st,saidas,pode);return {d,conf:!!st,c,pz:prazoDe(d)}}),[dias,salvos,data,diaAtual,escalas,saidas,pode]);
-  const alerta=linhas.filter(l=>l.pz.r>=0&&(l.c.abertos>0||l.c.pend>0||!l.conf));
+  const alerta=linhas.filter(l=>l.pz.r>=0&&(l.c.abertos>0||l.c.pend>0||l.c.pendMeli>0||!l.conf));
   return html`<${Card} className="md:col-span-12" title="Furos dos últimos dias" right=${html`<span class="text-[12px] text-muted">prazo de ${PRAZO_DIAS} dias para atribuir</span>`}>
     <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">${linhas.map(l=>{
-      const {c}=l;const st=!l.conf?{tom:"muted",t:"não conferido"}:c.abertos>0?{tom:"red",t:`${c.abertos} furo(s) aberto(s)`}:c.pend>0?{tom:"amber",t:`${c.pend} p/ atribuir`}:{tom:"green",t:c.trocas.length?"coberto":"sem furos"};
+      const {c}=l;const st=!l.conf?{tom:"muted",t:"não conferido"}:c.abertos>0?{tom:"red",t:`${c.abertos} furo(s) aberto(s)`}:c.pend+c.pendMeli>0?{tom:"amber",t:`${c.pend+c.pendMeli} p/ atribuir`}:{tom:"green",t:c.trocas.length?"coberto":"sem furos"};
       const sel=l.d===data;
       return html`<button type="button" key=${l.d} onClick=${()=>setData(l.d)} aria-pressed=${sel?"true":"false"} class="text-left rounded-2xl border p-3 transition-colors" style=${{borderColor:sel?"var(--accent)":"var(--line)",background:sel?fundoTom("accent"):"var(--wash)"}}>
         <div class="flex items-baseline justify-between gap-1"><span class="font-display text-[15px] tnum">${dm(l.d)}</span><span class="text-[11px] text-muted">${l.d===hojeISO()?"hoje":semanaDe(l.d)}</span></div>
         <div class="mt-1.5"><${Pill} tom=${st.tom}>${st.t}</${Pill}></div>
-        <div class="text-[11px] text-muted mt-1.5 tnum">${c.vagasFixas} a menos · ${c.abs} ABS · ${c.trocas.length} troca(s)</div>
+        <div class="text-[11px] text-muted mt-1.5 tnum">${c.vagasFixas} a menos · ${c.abs} ABS · ${c.trocas.length} troca(s)${(c.dia.pend||[]).length?" · "+c.dia.pend.length+" pend. Meli":""}</div>
         <div class="text-[11px] mt-0.5 font-medium" style=${{color:corTom(l.pz.tom)}}>${l.pz.r<0?"prazo encerrado":l.pz.r===0?"último dia":"até "+dm(l.pz.ate)}</div>
       </button>`})}</div>
     ${alerta.length>0&&html`<div class="text-[12px] text-muted mt-3">Ainda dá tempo de resolver: ${alerta.map(l=>dm(l.d)).join(", ")}. Toque no dia para lançar e ver as opções.</div>`}
     <div class="text-[11px] text-muted mt-1">Dias "não conferidos" mostram só as escalas com gente a menos (desligamento, mudança de cargo…), que existem todo dia. O cálculo usa o HC atual.</div>
+  </${Card}>`;
+}
+
+/* ============ ABS POR NOME · COBERTURA EM CADEIA ============
+   Lança quem faltou pelo nome. O painel acha a escala da pessoa e pede quem cobre.
+   Se quem cobre veio de outra escala, abre o furo lá e pede a próxima pessoa, até fechar. */
+function passosCadeia(c,calc){
+  const tr=[];for(const id of (c.trocas||[])){const t=calc.trocas.find(z=>z.id===id);if(!t)break;tr.push(t)}
+  let alvo=c.gid,lugar=c.nome;tr.forEach(t=>{alvo=t.pulmaoId?null:t.de;lugar=t.nome});
+  const n=alvo?calc.byId[alvo]:null;
+  const ausente=((calc.dia.ausentes||{})[c.gid]||[]).includes(c.pessoaId);
+  const estado=!ausente?"desmarcada":!alvo?"pulmao":(!n||n.folga)?"fechada":n.saldo>=0?"completa":"aberta";
+  return {tr,alvo,n,lugar,estado};
+}
+const nidT=()=>"t"+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+
+function BuscaCobre({calc,n,pode,podeEditar,onPessoa,onPulmao,onExtra}){
+  const [q,setQ]=useState("");const [mais,setMais]=useState(false);
+  const movidos=useMemo(()=>new Set(calc.trocas.filter(t=>t.pessoaId&&!t.pulmaoId).map(t=>t.pessoaId)),[calc.trocas]);
+  const ausentes=useMemo(()=>new Set(Object.values(calc.dia.ausentes||{}).flat()),[calc.dia]);
+  const info=p=>{const m=calc.byId[p.gid];
+    if(p.gid===n.id)return {bloq:"é da mesma escala"};
+    if(ausentes.has(p.id))return {bloq:"faltou hoje"};
+    if(movidos.has(p.id))return {bloq:"já foi trocado(a) hoje"};
+    if(!m||m.folga)return {bloq:"escala de folga · use o pulmão"};
+    if(!pode(p.hora,n.hora))return {tom:"red",txt:"horário incompatível"};
+    return m.saldo>0?{tom:"green",txt:`${m.g.code} tem sobra · não abre furo`}:{tom:"amber",txt:`abre furo na ${m.g.code}`}};
+  const compatP=x=>x.hora!=null?pode(x.hora,n.hora):(x.horas||[]).includes(n.hora);
+  const t=norm(q.trim()),d=dg(q);const buscando=t.length>=2||d.length>=3;
+  const achP=buscando?calc.pulmao.filter(x=>t.length>=2&&norm(x.nome).includes(t)).slice(0,4):[];
+  const ach=buscando?calc.todos.filter(p=>(t.length>=2&&norm(p.nome).includes(t))||(d.length>=3&&dg(p.cpf).includes(d))).slice(0,8):[];
+  const linha=(key,nome,sub,tom,txt,onClick,bloq)=>html`<button type="button" key=${key} disabled=${!!bloq||!podeEditar} onClick=${onClick}
+    class="w-full text-left px-3.5 py-2 text-[13px] border-t border-[var(--sep)] first:border-t-0 hover:bg-[var(--wash)] disabled:opacity-50 flex items-center gap-2 flex-wrap">
+    <span class="min-w-0 flex-1"><b>${nome}</b><span class="block text-[11px] text-muted">${sub}</span></span>
+    <${Pill} tom=${bloq?"muted":tom}>${bloq||txt}</${Pill}></button>`;
+  const chip=(key,txt,tom,onClick,label)=>html`<button type="button" key=${key} disabled=${!podeEditar} onClick=${onClick} aria-label=${label}
+    class="text-[12px] font-medium px-2.5 py-1 rounded-full hover:brightness-110" style=${{background:fundoTom(tom),color:corTom(tom)}}>${txt}</button>`;
+  const doNo=(p,m)=>({...p,gid:m.id,hora:m.hora,code:m.g.code,label:m.label});
+  const o=opcoesPara(n,calc,pode);
+  const dzL=diaristasLivres(calc).filter(p=>{const r=horaRef(minDe(p.horario),calc.horas);return r==null||pode(r,n.hora)});
+  const achDz=buscando?diaristasLivres(calc).filter(p=>(t.length>=2&&norm(p.nome).includes(t))||(d.length>=3&&dg(p.cpf).includes(d))).slice(0,4):[];
+  return html`<div class="grid gap-2 mt-2">
+    <input class=${campo} value=${q} onInput=${e=>setQ(e.target.value)} placeholder=${"Quem vai cobrir na "+n.g.code+"? Nome ou CPF"} autocomplete="off" aria-label=${"Quem vai cobrir na "+n.g.code}/>
+    ${buscando?html`<div class="rounded-2xl border border-line overflow-hidden" style=${{background:"var(--glass)"}}>
+      ${achDz.map(p=>linha("dz"+(p.cpf||p.nome),p.nome,"diarista lançado no dia · "+rotDz(p),"green","diarista · não abre furo",()=>{onExtra(p.nome);setQ("")}))}
+      ${achP.map(x=>linha("p"+x.id,x.nome,`pulmão · ${ORIGEM[x.origem]||"extra"}${x.hora!=null?" · bateu "+hh(x.hora):""}`,compatP(x)?"green":"red",compatP(x)?"pulmão · não abre furo":"horário incompatível",()=>{onPulmao(x);setQ("")}))}
+      ${ach.map(p=>{const i=info(p);return linha(p.id,p.nome,`escala ${p.code} · ${p.label}`,i.tom,i.txt,()=>{onPessoa(p);setQ("")},i.bloq)})}
+      ${t.length>=2&&linha("extra","Usar “"+q.trim()+"” como diarista/extra",`fora do HC · entra no pulmão às ${hh(n.hora)}`,"green","não abre furo",()=>{onExtra(q.trim());setQ("")})}
+    </div>`:html`<div>
+      ${(o.pul.length>0||o.sobra.length>0||dzL.length>0)?html`<div class="text-[11px] text-muted mb-1.5">Sugestões que fecham a cadeia (não abrem outro furo):</div>
+        <div class="flex flex-wrap gap-1.5">
+          ${dzL.map(p=>chip("dz"+(p.cpf||p.nome),`${p.nome} · diarista${p.horario?" "+p.horario:""}`,"green",()=>onExtra(p.nome),"Usar o diarista "+p.nome))}
+          ${o.pul.map(x=>chip("p"+x.id,`${x.nome} · pulmão${x.hora!=null?" "+hh(x.hora):""}`,"green",()=>onPulmao(x),"Usar "+x.nome+" do pulmão"))}
+          ${o.sobra.flatMap(m=>m.presentes.filter(p=>!p.troca).slice(0,6).map(p=>chip(m.id+p.id,`${p.nome} · ${m.g.code} (sobra)`,"green",()=>onPessoa(doNo(p,m)),"Usar "+p.nome+" da "+m.g.code)))}
+        </div>`:html`<div class="text-[12px] text-muted">Ninguém no pulmão nem escala com sobra num horário compatível. Digite o nome de quem você atribuiu.</div>`}
+      ${o.puxar.length>0&&html`<button type="button" onClick=${()=>setMais(!mais)} aria-expanded=${mais?"true":"false"} class="text-[12px] text-muted hover:text-ink mt-2">${mais?"▴":"▾"} Puxar de escala completa — abre furo lá (${o.puxar.length})</button>
+        ${mais&&html`<div class="mt-1.5 grid gap-1.5">${o.puxar.map(m=>html`<div key=${m.id}><div class="text-[12px]"><b>${m.g.code}</b> <span class="text-muted">· ${m.label}</span></div>
+          <div class="flex flex-wrap gap-1.5 mt-1">${m.presentes.filter(p=>!p.troca).slice(0,8).map(p=>chip(m.id+p.id,p.nome,"amber",()=>onPessoa(doNo(p,m)),"Usar "+p.nome+" da "+m.g.code+" (abre furo)"))}</div></div>`)}</div>`}`}
+    </div>`}
+  </div>`;
+}
+
+function CadeiaABS({calc,data,mudar,podeEditar,pode,toast,log=()=>{}}){
+  const {byId,todos}=calc;const dia=calc.dia;const cadeias=dia.cadeias||[];
+  const [q,setQ]=useState("");
+  const code=id=>byId[id]?byId[id].g.code:"?";const lab=id=>byId[id]?byId[id].label:"";
+  const movidos=new Set(calc.trocas.filter(t=>t.pessoaId&&!t.pulmaoId).map(t=>t.pessoaId));
+  const t=norm(q.trim()),d=dg(q);
+  const ach=(t.length>=2||d.length>=3)?todos.filter(p=>(t.length>=2&&norm(p.nome).includes(t))||(d.length>=3&&dg(p.cpf).includes(d))).slice(0,8):[];
+  const temCadeia=id=>cadeias.some(c=>c.pessoaId===id);
+  const addAbs=p=>{const m=byId[p.gid];
+    if(temCadeia(p.id)){toast(`${p.nome} já está nos ABS de hoje.`,true);return}
+    if(m&&m.folga){toast(`A ${p.code} está de folga hoje.`,true);return}
+    if(movidos.has(p.id)){toast(`${p.nome} foi trocado(a) hoje. Desfaça a troca antes.`,true);return}
+    log({tipo:"Falta marcada",nome:p.nome,cpf:p.cpf,escala:p.code,detalhe:"ABS por nome"});
+    mudar(x=>{const a=new Set(x.ausentes[p.gid]||[]);a.add(p.id);
+      return {...x,ausentes:{...x.ausentes,[p.gid]:[...a]},cadeias:[...(x.cadeias||[]),{id:"c"+Date.now().toString(36)+Math.random().toString(36).slice(2,5),pessoaId:p.id,nome:p.nome,cpf:p.cpf||"",gid:p.gid,trocas:[]}]}});
+    setQ("")};
+  const ligar=(c,troca,extra)=>mudar(x=>({...x,extras:extra?[...(x.extras||[]),extra]:(x.extras||[]),trocas:[...(x.trocas||[]),troca],
+    cadeias:(x.cadeias||[]).map(z=>z.id===c.id?{...z,trocas:[...(z.trocas||[]),troca.id]}:z)}));
+  const cobrir=(c,n,lugar)=>({
+    onPessoa:p=>{log({tipo:"Troca lançada",nome:p.nome,cpf:p.cpf,escala:p.code,para:n.g.code,detalhe:`cobre o lugar de ${lugar} (ABS de ${c.nome})`});
+      ligar(c,{id:nidT(),pessoaId:p.id,nome:p.nome,cpf:p.cpf||"",de:p.gid,para:n.id,feito:false,cadeia:c.id})},
+    onPulmao:x=>{const pes=x.pessoaId?todos.find(z=>z.id===x.pessoaId):null;
+      log({tipo:"Troca lançada",nome:x.nome,cpf:pes?pes.cpf:"",escala:"pulmão",para:n.g.code,detalhe:`cobre o lugar de ${lugar} (ABS de ${c.nome})`});
+      ligar(c,{id:nidT(),pulmaoId:x.id,pessoaId:x.pessoaId||null,nome:x.nome,cpf:pes?pes.cpf||"":"",de:null,para:n.id,origem:x.origem,feito:false,cadeia:c.id})},
+    onExtra:nome=>{const ex={id:"x"+Date.now().toString(36)+Math.random().toString(36).slice(2,4),nome,hora:n.hora,origem:"extra",cadeia:c.id};
+      log({tipo:"Pulmão: entrou",nome,escala:"",detalhe:`diarista/extra · cobre o lugar de ${lugar} na ${n.g.code}`});
+      ligar(c,{id:nidT(),pulmaoId:ex.id,pessoaId:null,nome,cpf:"",de:null,para:n.id,origem:"extra",feito:false,cadeia:c.id},ex)}});
+  const voltar=c=>{const ids=c.trocas||[];const last=ids[ids.length-1];if(!last)return;const tr=calc.trocas.find(z=>z.id===last);
+    if(tr)log({tipo:"Troca desfeita",nome:tr.nome,cpf:tr.cpf,escala:tr.pulmaoId?"pulmão":code(tr.de),para:code(tr.para)});
+    mudar(x=>({...x,trocas:(x.trocas||[]).filter(z=>z.id!==last),extras:(x.extras||[]).filter(e=>!(tr&&tr.pulmaoId===e.id&&e.cadeia===c.id)),
+      cadeias:(x.cadeias||[]).map(z=>z.id===c.id?{...z,trocas:ids.slice(0,-1)}:z)}))};
+  const tirar=c=>{const ids=new Set(c.trocas||[]);log({tipo:"Falta desmarcada",nome:c.nome,cpf:c.cpf,escala:code(c.gid),detalhe:"ABS por nome retirado"});
+    mudar(x=>({...x,ausentes:{...x.ausentes,[c.gid]:(x.ausentes[c.gid]||[]).filter(i=>i!==c.pessoaId)},trocas:(x.trocas||[]).filter(z=>!ids.has(z.id)),
+      extras:(x.extras||[]).filter(e=>e.cadeia!==c.id),cadeias:(x.cadeias||[]).filter(z=>z.id!==c.id)}))};
+  const estados=cadeias.map(c=>passosCadeia(c,calc));const abertas=estados.filter(s=>s.estado==="aberta").length;
+  const texto=()=>{let s=`*ABS – ${fmtData(data)}*\n`;cadeias.forEach((c,i)=>{const st=estados[i];let ant=c.nome;
+    s+=`\n${i+1}) ${c.nome}${c.cpf?" — "+c.cpf:""} — ${code(c.gid)} (${lab(c.gid)}) — AUSENTE\n`;
+    st.tr.forEach(z=>{s+=`   ↳ ${z.nome} (${z.pulmaoId?"pulmão":"da "+code(z.de)}) → lugar de ${ant} na ${code(z.para)}\n`;ant=z.nome});
+    s+=st.estado==="aberta"?`   ⚠ falta cobrir na ${st.n.g.code} (lugar de ${st.lugar})\n`:st.estado==="desmarcada"?`   (falta desmarcada)\n`:`   ✓ cadeia fechada\n`});return s};
+  const copiar=async()=>{try{await navigator.clipboard.writeText(texto());toast("Copiado.")}catch(e){toast("Não deu para copiar aqui.",true)}};
+  const EST={aberta:["red","falta cobrir"],pulmao:["green","fechada"],completa:["green","fechada"],fechada:["muted","encerrada"],desmarcada:["muted","falta desmarcada"]};
+  return html`<${Card} className="md:col-span-12" title="ABS do dia · cobertura em cadeia" right=${cadeias.length?html`<span class="flex items-center gap-2"><${Pill} tom=${abertas?"red":"green"}>${abertas?abertas+" em aberto":"tudo coberto"}</${Pill}><${BtnMini} onClick=${copiar}>Copiar</${BtnMini}></span>`:null}>
+    <div class="text-[12px] text-muted mb-3 max-w-2xl">Digite quem faltou: o painel mostra a escala da pessoa e pede quem vai cobrir. Se quem cobre saiu de outra escala, abre o furo lá e o painel pede a próxima pessoa — até a cadeia fechar com alguém do pulmão ou de escala com sobra.</div>
+    ${podeEditar&&html`<div class="grid gap-2 mb-4">
+      <input id="abs-nome" class=${campo} value=${q} onInput=${e=>setQ(e.target.value)} placeholder="Quem faltou? Nome ou CPF" autocomplete="off"/>
+      ${ach.length>0&&html`<div class="rounded-2xl border border-line overflow-hidden">${ach.map(p=>{const m=byId[p.gid];const bloq=temCadeia(p.id)?"já lançado":m&&m.folga?"escala de folga":movidos.has(p.id)?"trocado(a) hoje":"";
+        return html`<button type="button" key=${p.id} disabled=${!!bloq} onClick=${()=>addAbs(p)} class="w-full text-left px-3.5 py-2.5 text-[13px] border-t border-[var(--sep)] first:border-t-0 hover:bg-[var(--wash)] disabled:opacity-50 flex items-center gap-3">
+          <span class="min-w-0 flex-1"><b>${p.nome}</b><span class="block text-[11px] text-muted font-mono">${p.cpf||"sem CPF"}</span></span>
+          <span class="text-right shrink-0"><span class="block font-display text-[15px] tnum" style=${{color:"var(--accent)"}}>${p.code}</span><span class="block text-[11px] text-muted">${p.label}</span></span>
+          ${bloq?html`<${Pill} tom="muted">${bloq}</${Pill}>`:html`<${Pill} tom="red">lançar ABS</${Pill}>`}
+        </button>`})}</div>`}
+      ${(t.length>=2||d.length>=3)&&!ach.length&&html`<div class="text-[12px] text-muted">Ninguém com esse nome ou CPF nas escalas.</div>`}
+    </div>`}
+    ${!cadeias.length?html`<div class="text-[13px] text-muted">Nenhum ABS lançado por nome neste dia.</div>`:html`<div class="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">${cadeias.map((c,i)=>{const s=estados[i];const [tom,txt]=EST[s.estado];let ant=c.nome;
+      return html`<div key=${c.id} class="rounded-2xl border p-3.5" style=${{background:"var(--wash)",borderColor:s.estado==="aberta"?"color-mix(in srgb,var(--red) 35%,transparent)":"var(--line)"}}>
+        <div class="flex items-center gap-2 flex-wrap"><span class="text-[11px] uppercase tracking-[.14em] text-muted font-semibold">ABS ${i+1}${s.tr.length?" · "+s.tr.length+" troca(s)":""}</span><span class="ml-auto"><${Pill} tom=${tom}>${txt}</${Pill}></span></div>
+        <div class="flex gap-2 items-start text-[13px] py-1.5 mt-1"><span class="w-5 text-center shrink-0" style=${{color:"var(--red)"}}>●</span>
+          <span class="min-w-0"><b>${c.nome}</b> faltou — é da <b class="font-display tnum">${code(c.gid)}</b> <span class="text-muted">· ${lab(c.gid)}</span> <${Pill} tom="red">${c.motivo==="AT"?"ATESTADO":"AUSENTE"}</${Pill}>${c.planilha?html` <span class="text-[11px] text-muted">· da planilha</span>`:null}</span></div>
+        ${s.tr.map(z=>{const el=html`<div key=${z.id} class="flex gap-2 items-start text-[13px] py-1.5"><span class="w-5 text-center shrink-0" style=${{color:z.pulmaoId?"var(--green)":"var(--accent)"}}>↳</span>
+          <span class="min-w-0"><b>${z.nome}</b> <span class="text-muted">— ${z.pulmaoId?"pulmão ("+(ORIGEM[z.origem]||"extra")+")":"da "+code(z.de)+" · "+lab(z.de)}</span> → assume o lugar de <b>${ant}</b> na <b class="font-display tnum">${code(z.para)}</b></span></div>`;ant=z.nome;return el})}
+        ${s.estado==="aberta"?html`<div class="rounded-2xl px-3.5 py-3 mt-2" style=${{background:fundoTom("red")}}>
+            <div class="text-[13px]" style=${{color:"var(--red)"}}>⚠ Agora falta 1 na <b class="font-display tnum">${s.n.g.code}</b> · ${s.n.label} — o lugar de <b>${s.lugar}</b>. Quem vai cobrir?</div>
+            <${BuscaCobre} calc=${calc} n=${s.n} pode=${pode} podeEditar=${podeEditar} ...${cobrir(c,s.n,s.lugar)}/>
+          </div>`
+        :s.estado==="pulmao"?html`<div class="text-[12px] font-semibold mt-2" style=${{color:"var(--green)"}}>✓ Cadeia fechada — quem cobriu veio do pulmão, não abriu outro furo.</div>`
+        :s.estado==="completa"?html`<div class="text-[12px] font-semibold mt-2" style=${{color:"var(--green)"}}>✓ Cadeia fechada — a ${s.n.g.code} continua completa${s.tr.length?" (tinha sobra)":" mesmo com a falta"}.</div>`
+        :s.estado==="desmarcada"?html`<div class="text-[12px] text-muted mt-2">A falta de ${c.nome} foi desmarcada no quadro.</div>`
+        :html`<div class="text-[12px] text-muted mt-2">A escala ${s.n?s.n.g.code:""} está de folga hoje.</div>`}
+        ${podeEditar&&html`<div class="flex gap-1.5 flex-wrap mt-3">${s.tr.length>0&&html`<${BtnMini} onClick=${()=>voltar(c)}>↶ Voltar um passo</${BtnMini}>`}<${BtnMini} perigo onClick=${()=>tirar(c)}>Tirar este ABS</${BtnMini}></div>`}
+      </div>`})}</div>`}
+  </${Card}>`;
+}
+
+/* ============ PENDÊNCIAS DA MELI (quem bateu ponto e precisa ser atribuído) ============ */
+const STATUS_MELI={folga:{txt:"Dia de folga",tom:"amber"},horario:{txt:"Horário incompatível",tom:"red"},sem:{txt:"Sem solicitação",tom:"accent"}};
+const statusDe=l=>/folga/i.test(l)?"folga":/incompat/i.test(l)?"horario":/sem\s*solicita/i.test(l)?"sem":null;
+const hm=min=>min==null?"":`${String(Math.floor(min/60)).padStart(2,"0")}:${String(min%60).padStart(2,"0")}`;
+/* linhas de texto (células separadas por tab) → [{data, nome, cpf, min, status}] */
+function lerPendencias(linhas){
+  const out=[];let data=null,secao=null;const anoAtual=new Date().getFullYear();const vistos=new Set();
+  for(const raw of linhas){
+    const l=String(raw||"").replace(/[\t ]+/g," ").trim();if(!l)continue;
+    const cpfM=l.match(/(\d{3})\.?(\d{3})\.?(\d{3})-?(\d{2})(?!\d)/);
+    const horaM=l.match(/\b(\d{1,2}):(\d{2})(?::\d{2})?\s*h/i)||(!cpfM?null:l.match(/\b(\d{1,2}):(\d{2})\b/));
+    const iso=l.match(/^(\d{4})-(\d{2})-(\d{2})/);const br=l.match(/^(?:[a-zç]{3,}\.?,?\s*)?(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/i);
+    if(!cpfM&&!horaM&&(iso||br)){
+      if(iso)data=`${iso[1]}-${iso[2]}-${iso[3]}`;
+      else{let a=br[3]?+br[3]:anoAtual;if(a<100)a+=2000;data=`${a}-${String(br[2]).padStart(2,"0")}-${String(br[1]).padStart(2,"0")}`}
+      secao=null;continue}
+    const st=statusDe(l);
+    let nome=l;if(cpfM)nome=nome.replace(cpfM[0]," ");
+    nome=nome.replace(/sem dados de cpf/ig," ").replace(/\b\d{1,2}:\d{2}(:\d{2})?\s*(hs|h)?\b/ig," ")
+      .replace(/dia de folga|hor[aá]rio incompat[ií]vel|sem solicita[cç][aã]o|\d*\s*solicita[cç](ão|ao|ões|oes)\s*ativas?/ig," ")
+      .replace(/\s+/g," ").trim().replace(/^[-–:|]+|[-–:|]+$/g,"").trim();
+    if(!cpfM&&!horaM&&st&&nome.length<3){secao=st;continue}
+    if(!/[a-zà-ú]{2,}/i.test(nome)||!data)continue;
+    const it={data,nome,cpf:cpfM?fmtCpf(cpfM.slice(1,5).join("")):"",min:horaM?(+horaM[1])*60+(+horaM[2]):null,status:st||secao||"sem"};
+    const k=data+"|"+(dg(it.cpf)||norm(nome));if(vistos.has(k))continue;vistos.add(k);out.push(it);
+  }
+  return out;
+}
+async function lerArquivoMeli(f){
+  if(/\.(xlsx|xls|ods)$/i.test(f.name)){
+    if(!window.XLSX)await new Promise((ok,no)=>{const s=document.createElement("script");s.src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";s.onload=ok;s.onerror=()=>no(new Error("Não deu para carregar o leitor de Excel"));document.head.appendChild(s)});
+    const wb=XLSX.read(await f.arrayBuffer(),{type:"array",cellDates:true});const linhas=[];
+    wb.SheetNames.forEach(n=>XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:true,defval:""}).forEach(r=>linhas.push(r.map(v=>v instanceof Date?isoDe(new Date(v.getTime()+12*3600e3)):String(v)).join("\t"))));
+    return linhas;
+  }
+  return (await f.text()).split(/\r?\n/);
+}
+function acharNoHC(escalas,cpf,nome){
+  const d=dg(cpf),n=norm(nome).trim();
+  for(const g of escalas)for(const p of (g.pessoas||[]))if(d&&dg(p.cpf)===d)return {p,g};
+  if(n)for(const g of escalas)for(const p of (g.pessoas||[]))if(norm(p.nome).trim()===n)return {p,g};
+  return null;
+}
+function mesclarPend(dia,itens,escalas){
+  dia={...DIA_VAZIO,...(dia||{})};const pend=[...(dia.pend||[])];const folga={...dia.folga};let novas=0;const folgas=[];
+  itens.forEach(it=>{const k=dg(it.cpf)||norm(it.nome);if(pend.some(p=>(dg(p.cpf)||norm(p.nome))===k))return;
+    pend.push({id:"m"+Date.now().toString(36)+Math.random().toString(36).slice(2,6),nome:it.nome,cpf:it.cpf,min:it.min,status:it.status,feito:false});novas++;
+    if(it.status==="folga"){const h=acharNoHC(escalas,it.cpf,it.nome);if(h&&h.g.tipo!=="cargo"&&!folga[h.g._id]){folga[h.g._id]=true;folgas.push(h.g.code)}}});
+  return {dia:{...dia,pend,folga},novas,folgas};
+}
+/* horário de escala mais provável para uma batida (chegar antes é o normal) */
+function horaRef(min,horas){if(min==null||!horas.length)return null;let best=null,bc=Infinity;
+  horas.forEach(h=>{const df=h*60-min;const c=df>=0?df:-df*2;if(c<bc){bc=c;best=h}});return best}
+function sugerirDestino(own,ref,calc,pode,usados,diarista){
+  usados=usados||{};const r=ref??(own?own.hora:null);
+  if(own&&!own.folga&&(r==null||own.hora===r))return own.id;
+  if(r==null)return "";
+  const cand=calc.nos.filter(n=>!n.folga&&pode(r,n.hora));
+  const livre=n=>n.falta-(usados[n.id]||0);
+  const quadro=n=>diarista&&n.vagaFixa>0&&livre(n)>0?1:0;
+  cand.sort((a,b)=>quadro(b)-quadro(a)||(livre(b)>0)-(livre(a)>0)||Math.abs(a.hora-r)-Math.abs(b.hora-r)||a.saldo-b.saldo);
+  return cand[0]?cand[0].id:"";
+}
+
+function ImportarMeli({escalas,onCancelar,onImportar}){
+  const [texto,setTexto]=useState("");const [linhas,setLinhas]=useState(null);const [arq,setArq]=useState("");const [busy,setBusy]=useState(false);const [erro,setErro]=useState("");
+  const itens=useMemo(()=>lerPendencias(linhas||texto.split(/\r?\n/)),[linhas,texto]);
+  const porData={};itens.forEach(i=>(porData[i.data]??=[]).push(i));const datas=Object.keys(porData).sort();
+  const noHC=itens.filter(i=>acharNoHC(escalas,i.cpf,i.nome)).length;
+  const escolher=async e=>{const f=e.target.files[0];if(!f)return;setErro("");try{setLinhas(await lerArquivoMeli(f));setArq(f.name)}catch(x){setErro(x.message||"Não deu para ler esse arquivo.")}};
+  const ir=async()=>{setBusy(true);try{await onImportar(porData)}finally{setBusy(false)}};
+  return html`<div class="rounded-2xl p-3.5 mb-3 border grid gap-3" style=${{background:"color-mix(in srgb,var(--accent) 6%,transparent)",borderColor:"color-mix(in srgb,var(--accent) 25%,transparent)"}}>
+    <div class="text-[13px]">Envie a planilha ou cole a lista de pendências da Meli. Cada dia começa com a data (ex.: 03/10/2026) e cada linha tem nome, CPF, horário da batida e o motivo.</div>
+    <div class="flex gap-2 flex-wrap items-center">
+      <label class="text-[13px] font-medium px-4 py-2 rounded-full border border-line cursor-pointer hover:border-[var(--line2)]">Escolher planilha (.xlsx ou .csv)<input type="file" accept=".xlsx,.xls,.ods,.csv,.txt" class="sr-only" onChange=${escolher}/></label>
+      ${arq&&html`<span class="text-[12px] text-muted">${arq}</span><${BtnMini} onClick=${()=>{setLinhas(null);setArq("")}}>trocar por texto colado</${BtnMini}>`}
+    </div>
+    ${!linhas&&html`<textarea id="meli-texto" rows="5" value=${texto} onInput=${e=>setTexto(e.target.value)} class=${campo+" font-mono text-[12px] resize-y"} placeholder=${"03/10/2026\nMaria da Silva123.456.789-09\t05:55 hs\tDia de folga1 solicitação ativa"}></textarea>`}
+    ${erro&&html`<div class="text-[12px]" style=${{color:"var(--red)"}}>${erro}</div>`}
+    ${itens.length>0&&html`<div class="text-[12px] text-muted"><b class="text-ink">${itens.length}</b> pendência(s) em <b class="text-ink">${datas.length}</b> dia(s) · ${noHC} encontrada(s) no HC · ${itens.length-noHC} fora do HC (entram como diarista/extra)</div>
+      <div class="flex flex-wrap gap-1.5">${datas.map(d=>{const c={folga:0,horario:0,sem:0};porData[d].forEach(i=>c[i.status]++);const pz=prazoDe(d);
+        return html`<span key=${d} class="text-[12px] rounded-xl border border-line px-2.5 py-1.5" style=${{background:"var(--wash)"}}><b class="tnum">${dm(d)}</b> <span class="text-muted">· ${porData[d].length} (${c.folga} folga, ${c.horario} horário, ${c.sem} sem sol.)</span> <span style=${{color:corTom(pz.tom)}}>${pz.r<0?"· prazo encerrado":""}</span></span>`})}</div>`}
+    <div class="text-[11px] text-muted">Quem aparece com "Dia de folga" e está no HC: a escala dele(a) é marcada de folga naquele dia (dá para desmarcar no Quadro completo). Quem já foi importado no mesmo dia não entra de novo.</div>
+    <div class="flex justify-end gap-2 flex-wrap"><${BtnSec} onClick=${onCancelar}>Cancelar</${BtnSec}><${BtnPrim} disabled=${busy||!itens.length} onClick=${ir}>${busy?"Importando…":`Importar ${itens.length||""} pendência(s)`}</${BtnPrim}></div>
+  </div>`;
+}
+
+function PendenciasMeli({calc,data,mudar,escalas,pode,podeEditar,toast,log=()=>{},onImportar}){
+  const [abrirImp,setAbrirImp]=useState(false);const [escolha,setEscolha]=useState({});const [fil,setFil]=useState("abertas");
+  const pend=calc.dia.pend||[];const {byId,horas}=calc;
+  const code=id=>byId[id]?byId[id].g.code:"?";
+  const movidos=new Set(calc.trocas.filter(t=>t.pessoaId&&!t.pulmaoId).map(t=>t.pessoaId));
+  const info=p=>{const hc=acharNoHC(escalas,p.cpf,p.nome);const own=hc?byId[hc.g._id]:null;const ref=horaRef(p.min,horas);
+    const tr=p.trocaId?calc.trocas.find(t=>t.id===p.trocaId):null;const resolvida=!!(p.destino&&(p.propria||tr));
+    const feito=p.propria?!!p.feito:!!(tr&&tr.feito);const dzx=hc?null:acharDiarista(calc.dz,p.cpf,p.nome);return {hc,own,ref,tr,resolvida,feito,dz:dzx}};
+  const lista=pend.map(p=>({p,...info(p)}));
+  const abertas=lista.filter(x=>!x.resolvida).length;const semMeli=lista.filter(x=>x.resolvida&&!x.feito).length;
+  const montar=(x,D)=>{const {p,hc,own,ref}=x;const n=byId[D];if(!n)return null;
+    if(own&&own.id===D)return {pend:{destino:D,propria:true,trocaId:null,extraId:null}};
+    if(hc&&own&&!own.folga&&calc.presentesIds.has(hc.p.id)&&!movidos.has(hc.p.id)){const id=nidT();
+      return {pend:{destino:D,propria:false,trocaId:id,extraId:null},troca:{id,pessoaId:hc.p.id,nome:hc.p.nome,cpf:hc.p.cpf||p.cpf,de:own.id,para:D,feito:false,meli:p.id}}}
+    const ex={id:"x"+Date.now().toString(36)+Math.random().toString(36).slice(2,6),pessoaId:hc?hc.p.id:null,nome:hc?hc.p.nome:p.nome,cpf:p.cpf||"",groot:x.dz?x.dz.groot:"",diarista:!!x.dz,hora:ref??n.hora,origem:p.status==="folga"?"folga":hc?"sem":"extra",escala:hc?hc.g.code:"",meli:p.id};
+    const id=nidT();return {pend:{destino:D,propria:false,trocaId:id,extraId:ex.id},extra:ex,troca:{id,pulmaoId:ex.id,pessoaId:ex.pessoaId,nome:ex.nome,cpf:p.cpf,de:null,para:D,origem:ex.origem,feito:false,meli:p.id}}};
+  const aplicar=ops=>mudar(y=>({...y,extras:[...(y.extras||[]),...ops.filter(o=>o.r.extra).map(o=>o.r.extra)],trocas:[...(y.trocas||[]),...ops.filter(o=>o.r.troca).map(o=>o.r.troca)],
+    pend:(y.pend||[]).map(p=>{const o=ops.find(z=>z.id===p.id);return o?{...p,...o.r.pend,feito:false}:p})}));
+  const atribuir=(x,D)=>{if(movidos.has(x.hc&&x.hc.p.id)&&!(x.own&&x.own.id===D)){toast(`${x.p.nome} já tem uma troca lançada hoje.`,true);return}
+    const r=montar(x,D);if(!r){toast("Escolha a escala.",true);return}
+    log({tipo:"Troca lançada",nome:x.p.nome,cpf:x.p.cpf,escala:x.hc?x.hc.g.code:"fora do HC",para:code(D),detalhe:`pendência Meli: ${STATUS_MELI[x.p.status].txt}${x.p.min!=null?" · bateu "+hm(x.p.min):""}`});aplicar([{id:x.p.id,r}])};
+  const atribuirTodas=()=>{const usados={};const ops=[];
+    lista.filter(x=>!x.resolvida).forEach(x=>{const D=escolha[x.p.id]||sugerirDestino(x.own,x.ref,calc,pode,usados,!x.hc);if(!D)return;
+      if(x.hc&&movidos.has(x.hc.p.id)&&!(x.own&&x.own.id===D))return;const r=montar(x,D);if(!r)return;usados[D]=(usados[D]||0)+1;ops.push({id:x.p.id,r})});
+    if(!ops.length){toast("Nenhuma sugestão para aplicar.",true);return}
+    log({tipo:"Sugestão aplicada",nome:`${ops.length} pendência(s) da Meli`,detalhe:ops.map(o=>{const p=pend.find(z=>z.id===o.id);return `${p.nome} → ${code(o.r.pend.destino)}`}).join(" · ")});aplicar(ops);toast(`${ops.length} atribuição(ões) lançada(s).`)};
+  const desfazer=x=>{const {p}=x;log({tipo:"Troca desfeita",nome:p.nome,cpf:p.cpf,para:code(p.destino),detalhe:"pendência Meli"});
+    mudar(y=>({...y,trocas:(y.trocas||[]).filter(t=>t.id!==p.trocaId),extras:(y.extras||[]).filter(e=>e.id!==p.extraId),
+      pend:(y.pend||[]).map(z=>z.id===p.id?{...z,destino:null,propria:false,trocaId:null,extraId:null,feito:false}:z)}))};
+  const marcar=x=>{const v=!x.feito;log({tipo:v?"Atribuído na Meli":"Atribuição desmarcada",nome:x.p.nome,cpf:x.p.cpf,para:code(x.p.destino)});
+    mudar(y=>({...y,pend:(y.pend||[]).map(z=>z.id===x.p.id?{...z,feito:v}:z),trocas:(y.trocas||[]).map(t=>t.id===x.p.trocaId?{...t,feito:v}:t)}))};
+  const remover=x=>{mudar(y=>({...y,trocas:(y.trocas||[]).filter(t=>t.id!==x.p.trocaId),extras:(y.extras||[]).filter(e=>e.id!==x.p.extraId),pend:(y.pend||[]).filter(z=>z.id!==x.p.id)}))};
+  const copiar=async()=>{let s=`*ATRIBUIR NA MELI – ${fmtData(data)}* (De ${dm(data)} Até ${dm(data)})\n`;
+    lista.forEach(x=>{s+=`${x.feito?"✅":"▫️"} ${x.p.nome}${x.p.cpf?" — "+x.p.cpf:""}${x.p.min!=null?" — bateu "+hm(x.p.min):""} — ${x.dz?"DIARISTA":STATUS_MELI[x.p.status].txt} → ${x.resolvida?code(x.p.destino):"(sem destino)"}\n`});
+    try{await navigator.clipboard.writeText(s);toast("Copiado.")}catch(e){toast("Não deu para copiar aqui.",true)}};
+  const vis=lista.filter(x=>fil==="todas"||(fil==="abertas"?!x.resolvida||!x.feito:fil==="diarista"?!!x.dz:x.p.status===fil)).sort((a,b)=>(a.resolvida-b.resolvida)||((a.p.min??9999)-(b.p.min??9999)));
+  const opcoes=x=>calc.nos.filter(n=>!n.folga).sort((a,b)=>a.hora-b.hora||String(a.g.code).localeCompare(String(b.g.code))).map(n=>{const ok=x.ref==null||pode(x.ref,n.hora);
+    return html`<option key=${n.id} value=${n.id}>${n.g.code} · ${n.label}${n.falta>0?` · falta ${n.falta}`:n.saldo>0?` · sobra ${n.saldo}`:""}${ok?"":" (horário incompatível)"}${x.own&&x.own.id===n.id?" · escala dele(a)":""}</option>`});
+  return html`<${Card} className="md:col-span-12" title="Pendências da Meli · atribuir" right=${html`<span class="flex items-center gap-2 flex-wrap">
+      ${pend.length>0&&html`<${Pill} tom=${abertas?"red":semMeli?"amber":"green"}>${abertas?abertas+" sem destino":semMeli?semMeli+" p/ marcar na Meli":"tudo atribuído"}</${Pill}><${BtnMini} onClick=${copiar}>Copiar</${BtnMini}>`}
+      ${podeEditar&&html`<${BtnMini} onClick=${()=>setAbrirImp(!abrirImp)}>${abrirImp?"Fechar":"⇪ Importar da Meli"}</${BtnMini}>`}</span>`}>
+    ${abrirImp&&html`<${ImportarMeli} escalas=${escalas} onCancelar=${()=>setAbrirImp(false)} onImportar=${async pd=>{const ok=await onImportar(pd);if(ok)setAbrirImp(false)}}/>`}
+    ${!pend.length?html`<div class="text-[13px] text-muted">Nenhuma pendência da Meli neste dia. Use <b class="text-ink">Importar da Meli</b> com a planilha de pendências — ela pode ter vários dias, cada um vai para o seu dia.</div>`:html`
+      <div class="text-[12px] text-muted mb-3 max-w-3xl">O painel acha a escala de cada pessoa e sugere onde atribuir: na própria escala se o horário bate; senão, numa escala com furo num horário compatível com a batida. Quem estava de folga ou fora do HC entra pelo pulmão e não abre furo. Atribua na Meli com <b class="text-ink">De ${dm(data)} Até ${dm(data)}</b> e marque ✓.</div>
+      <div class="flex gap-1.5 flex-wrap mb-3 items-center">
+        ${[["abertas","A fazer"],["todas","Todas"],["diarista","Diaristas"],["folga","Dia de folga"],["horario","Horário incompatível"],["sem","Sem solicitação"]].map(([k,t])=>html`<${Mini} key=${k} ativo=${fil===k} label=${t} onClick=${()=>setFil(k)}>${t} · ${k==="todas"?lista.length:k==="abertas"?lista.filter(x=>!x.resolvida||!x.feito).length:k==="diarista"?lista.filter(x=>x.dz).length:lista.filter(x=>x.p.status===k).length}</${Mini}>`)}
+        ${podeEditar&&abertas>0&&html`<span class="ml-auto"><${BtnPrim} onClick=${atribuirTodas}>Atribuir sugestões (${abertas})</${BtnPrim}></span>`}
+      </div>
+      ${!vis.length?html`<div class="text-[13px]" style=${{color:"var(--green)"}}>✓ Nada a fazer com esse filtro.</div>`:html`<div class="grid gap-2">${vis.map(x=>{const {p,hc,own,ref}=x;const st=STATUS_MELI[p.status];
+        const sug=sugerirDestino(own,ref,calc,pode,null,!hc);const sel=escolha[p.id]||sug;const nSel=byId[sel];
+        return html`<div key=${p.id} class="rounded-2xl border border-line p-3" style=${{background:"var(--wash)",opacity:x.feito?.65:1}}>
+          <div class="flex items-start gap-2 flex-wrap">
+            <span class="min-w-0 flex-1"><b class="text-[14px]">${p.nome}</b> <span class="align-middle"><${Pill} tom=${st.tom}>${st.txt}</${Pill}></span>
+              <span class="block font-mono text-[12px] text-muted tnum mt-0.5">${p.cpf||"sem CPF"}${p.min!=null?" · bateu "+hm(p.min):""}${ref!=null?" → turno das "+hh(ref):""}</span>
+              <span class="block text-[12px] mt-0.5">${hc?html`<span class="text-muted">é da</span> <b class="font-display tnum">${hc.g.code}</b> <span class="text-muted">· ${own?own.label:(hc.g.turno||"")}${own&&own.folga?" · escala de folga hoje":""}</span>`
+                :x.dz?html`<${Pill} tom="green">DIARISTA</${Pill}> <span class="text-muted">${rotDz(x.dz)}</span> ${x.dz.hoje?html`<${Pill} tom="green">lançado no dia</${Pill}>`:html`<${Pill} tom="amber">não lançado no dia</${Pill}>`}`
+                :html`<span style=${{color:"var(--amber)"}}>fora do HC${calc.dz&&calc.dz.ok?" e fora do banco de diaristas":""} · entra como extra</span>`}</span></span>
+            ${podeEditar&&!x.resolvida&&html`<${BtnMini} perigo label=${"Tirar pendência de "+p.nome} onClick=${()=>remover(x)}>✕</${BtnMini}>`}
+          </div>
+          ${x.resolvida?html`<div class="flex items-center gap-2 flex-wrap mt-2 text-[13px]">
+              <label class="inline-flex items-center gap-2 cursor-pointer"><input type="checkbox" class="w-4 h-4 accent-[var(--accent)]" checked=${x.feito} disabled=${!podeEditar} onChange=${()=>marcar(x)}/>
+                <span>Atribuir na <b class="font-display tnum">${code(p.destino)}</b> <span class="text-muted">· ${byId[p.destino]?byId[p.destino].label:""}${p.propria?" · própria escala":x.tr&&x.tr.pulmaoId?" · pelo pulmão":x.tr?" · saiu da "+code(x.tr.de):""}</span></span></label>
+              ${x.feito&&html`<${Pill} tom="green">feito na Meli</${Pill}>`}
+              ${podeEditar&&html`<span class="ml-auto"><${BtnMini} onClick=${()=>desfazer(x)}>Desfazer</${BtnMini}></span>`}
+              ${x.tr&&!x.tr.pulmaoId&&byId[x.tr.de]&&byId[x.tr.de].falta>0&&html`<div class="w-full text-[11px]" style=${{color:"var(--red)"}}>abriu furo na ${code(x.tr.de)} (lugar de ${x.tr.nome}) — veja em Furos em aberto</div>`}
+            </div>`
+          :podeEditar&&html`<div class="flex gap-2 flex-wrap items-center mt-2">
+              <select aria-label=${"Escala para atribuir "+p.nome} class=${campo+" !w-auto flex-1 min-w-[220px] !py-2 text-[13px]"} value=${sel} onChange=${e=>setEscolha(s=>({...s,[p.id]:e.target.value}))}><option value="">Escolha a escala…</option>${opcoes(x)}</select>
+              <${BtnPrim} disabled=${!sel} onClick=${()=>atribuir(x,sel)}>Atribuir</${BtnPrim}>
+              ${nSel&&html`<span class="w-full text-[11px] text-muted">${sel===sug?"sugestão: ":""}${own&&own.id===sel?"própria escala, horário bate":hc&&own&&!own.folga&&calc.presentesIds.has(hc.p.id)&&!movidos.has(hc.p.id)?`sai da ${own.g.code} (abre furo lá)`:"entra pelo pulmão, não abre furo"}${nSel.falta>0?` · cobre furo da ${nSel.g.code}`:""}</span>`}
+            </div>`}
+        </div>`})}</div>`}`}
+  </${Card}>`;
+}
+
+/* ============ PLANILHA HEADCOUNT (Apps Script) ============ */
+const K_SHEETS="escpainel:planilha";
+const PLANILHA_PADRAO={url:"https://script.google.com/macros/s/AKfycbxH6CD_BsLIHcel7mn_LLz5H2eoiGCb-tigI6LOfnH7SspMw9AM5B2dDqtwK3KqbJ3-nA/exec",chave:"kn2026cobertura"};
+const cfgPlanilha=async()=>{try{const c=await lerChave(K_SHEETS);if(c&&c.url)return c}catch(e){}return PLANILHA_PADRAO};
+async function chamarPlanilha(cfg,iso){
+  const u=cfg.url.trim()+(cfg.url.includes("?")?"&":"?")+"data="+iso+"&chave="+encodeURIComponent(cfg.chave||"");
+  try{const r=await fetch(u);return await r.json()}
+  catch(e){return await new Promise((ok,no)=>{const cb="knp"+Date.now().toString(36);const s=document.createElement("script");const tm=setTimeout(()=>{no(new Error("A planilha demorou demais para responder"));s.remove()},45000);
+    window[cb]=d=>{clearTimeout(tm);ok(d);try{delete window[cb]}catch(_){}s.remove()};s.onerror=()=>{clearTimeout(tm);no(new Error("Não deu para falar com a planilha. Confira o link em ⚙ Configurações."));s.remove()};
+    s.src=u+"&callback="+cb;document.head.appendChild(s)})}
+}
+const chaveT=s=>norm(s).replace(/[\s.]+/g,"");
+function acharEscala(escalas,antiga,turno){
+  const a=String(antiga||"").trim();if(a){const g=escalas.find(x=>String(x.code).trim()===a);if(g)return g}
+  const t=chaveT(turno);return t?escalas.find(x=>chaveT(x.turno)===t)||null:null;
+}
+/* aplica no dia: escalas de folga, "precisa" pelo quadro da HC_PLAN e os ABS (F/AT) com cadeia de cobertura */
+function aplicarPlanilha(dia,r,escalas){
+  dia={...DIA_VAZIO,...(dia||{})};
+  const ops=escalas.filter(g=>g.tipo!=="cargo"&&rotuloTurno(g.turno));
+  const folga={...dia.folga},precisa={...dia.precisa},aus={...dia.ausentes},cad=[...(dia.cadeias||[])],hc={};
+  const movidos=new Set((dia.trocas||[]).filter(t=>t.pessoaId&&!t.pulmaoId).map(t=>t.pessoaId));
+  const fol=new Set((r.folgas||[]).map(chaveT));const sem={};Object.entries(r.semana||{}).forEach(([t,v])=>sem[chaveT(t)]=v);
+  let nFolga=0;
+  ops.forEach(g=>{const k=chaveT(g.turno);if((fol.has(k)||sem[k]===0)&&!folga[g._id]){folga[g._id]=true;nFolga++}});
+  (r.hcplan||[]).forEach(h=>{const g=acharEscala(ops,h.antiga,h.turno);if(!g)return;hc[g._id]={planejado:h.planejado,atual:h.atual,delta:h.delta,ferias:h.ferias,inss:h.inss};
+    if(!folga[g._id])precisa[g._id]=Math.max(0,(g.pessoas||[]).length-h.delta)});
+  const naoAchados=[];let nAbs=0;
+  (r.abs||[]).forEach(a=>{const h=acharNoHC(ops,a.cpf,a.nome);
+    if(!h){naoAchados.push({nome:a.nome,cpf:a.cpf,antiga:a.antiga,codigo:a.codigo});return}
+    if(folga[h.g._id]||movidos.has(h.p.id))return;
+    const s=new Set(aus[h.g._id]||[]);if(!s.has(h.p.id)){s.add(h.p.id);aus[h.g._id]=[...s];nAbs++}
+    if(!cad.some(c=>c.pessoaId===h.p.id))cad.push({id:"c"+Date.now().toString(36)+Math.random().toString(36).slice(2,6),pessoaId:h.p.id,nome:h.p.nome,cpf:h.p.cpf||"",gid:h.g._id,trocas:[],motivo:a.codigo,planilha:true})});
+  return {dia:{...dia,folga,precisa,ausentes:aus,cadeias:cad,hcplan:hc,planilha:{em:new Date().toISOString(),abs:(r.abs||[]).length,naoAchados,colunaDoDia:r.colunaDoDia!==false,quadro:Object.keys(hc).length}},nAbs,nFolga,naoAchados};
+}
+
+/* ---- QUADRO · DIARISTAS: o que falta no HC (Delta da HC_PLAN) é coberto primeiro por diarista ---- */
+/* ============ DIARISTAS (banco do KN Diaristas Control) ============ */
+const K_DZ="escpainel:diaristas";
+let sbDz=null,sbDzId="";
+async function nuvemDz(cfg){await nuvem();const id=cfg.url+"|"+cfg.key;
+  if(!sbDz||sbDzId!==id){sbDz=window.supabase.createClient(cfg.url.trim(),cfg.key.trim(),{auth:{persistSession:false,autoRefreshToken:false,storageKey:"kn-painel-dz"}});sbDzId=id}return sbDz}
+const pick=(r,...ks)=>{for(const k of ks){if(r[k]!=null&&r[k]!=="")return r[k]}return ""};
+const normDz=r=>({nome:String(pick(r,"nome","nome_completo","name")).trim(),cpf:fmtCpf(String(pick(r,"cpf"))),groot:String(pick(r,"groot_id","grootid","groot","matricula","id_groot")).trim(),
+  empresa:String(pick(r,"empresa","company")).trim(),turno:String(pick(r,"turno")).trim(),horario:String(pick(r,"horario","hora","hora_entrada","entrada")).trim().slice(0,5),cargo:String(pick(r,"cargo")).trim()});
+async function lerDiaristas(cfg,iso){
+  const c=await nuvemDz(cfg);const tb=(cfg.tabela||"diaristas").trim(),th=(cfg.historico||"historico_diarias").trim();
+  const b=await c.from(tb).select("*").limit(5000);if(b.error)throw new Error("tabela "+tb+": "+b.error.message);
+  let d=null,erroD="";for(const col of ["data","data_lancamento","dia","date"]){const r=await c.from(th).select("*").eq(col,iso).limit(2000);if(!r.error){d=r.data;break}erroD=r.error.message}
+  const vistos=new Set();const dia=(d||[]).map(normDz).filter(x=>{const k=dg(x.cpf)||norm(x.nome);if(!x.nome||vistos.has(k))return false;vistos.add(k);return true});
+  return {banco:(b.data||[]).map(normDz).filter(x=>x.nome),dia,ok:true,erroDia:d?"":"lançamentos do dia: "+erroD};
+}
+const minDe=h=>{const m=String(h||"").match(/(\d{1,2}):(\d{2})/);return m?(+m[1])*60+(+m[2]):null};
+function acharDiarista(dz,cpf,nome){if(!dz)return null;const d=dg(cpf),n=norm(nome).trim();
+  const ach=l=>(d&&l.find(x=>dg(x.cpf)===d))||(n&&l.find(x=>norm(x.nome).trim()===n))||null;
+  const h=ach(dz.dia||[]);if(h)return {...h,hoje:true};const b=ach(dz.banco||[]);return b?{...b,hoje:false}:null}
+/* diaristas lançados no dia que ainda não foram postos em nenhuma escala */
+function diaristasLivres(calc){const dz=calc.dz;if(!dz||!dz.dia)return [];
+  const usados=new Set();(calc.dia.extras||[]).forEach(e=>{usados.add(norm(e.nome).trim());if(e.cpf)usados.add(dg(e.cpf))});
+  return dz.dia.filter(x=>!usados.has(norm(x.nome).trim())&&!(dg(x.cpf)&&usados.has(dg(x.cpf))))}
+const rotDz=x=>[x.empresa,x.turno,x.horario?"entrada "+x.horario:"",x.groot?"Groot "+x.groot:""].filter(Boolean).join(" · ");
+
+function CfgDiaristas(){
+  const [f,setF]=useState({url:"https://cnpcsovjomonctbggbac.supabase.co",key:"",tabela:"diaristas",historico:"historico_diarias"});const [msg,setMsg]=useState("");const [busy,setBusy]=useState(false);
+  useEffect(()=>{lerChave(K_DZ).then(c=>{if(c)setF(x=>({...x,...c}))}).catch(()=>{})},[]);
+  const set=k=>e=>{const v=e.target.value;setF(x=>({...x,[k]:v}))};
+  const salvar=async()=>{setBusy(true);setMsg("");try{await salvarChave(K_DZ,{...f,em:new Date().toISOString()});
+      if(f.key.trim()){setMsg("Salvo. Testando…");const r=await lerDiaristas(f,hojeISO());setMsg(`✓ Funcionando: ${r.banco.length} diarista(s) no banco · ${r.dia.length} lançado(s) hoje${r.erroDia?" · ⚠ "+r.erroDia:""}`)}else setMsg("Salvo.")}
+    catch(e){setMsg("Salvo, mas o teste falhou: "+(e.message||e))}finally{setBusy(false)}};
+  return html`<div class="text-[11px] uppercase tracking-[.16em] text-muted font-semibold mt-5 mb-2">Banco de diaristas (KN Diaristas Control)</div>
+    <div class="text-[12px] text-muted mb-2">O mesmo Supabase do Controle de Diaristas. Cole a chave publishable/anon que está no app de diaristas.</div>
+    <div class="grid gap-2">
+      <input class=${campo+" font-mono text-[12px]"} value=${f.url} onInput=${set("url")} placeholder="https://xxxx.supabase.co" aria-label="Endereço do Supabase dos diaristas"/>
+      <input class=${campo+" font-mono text-[12px]"} value=${f.key} onInput=${set("key")} placeholder="Chave publishable/anon" aria-label="Chave do Supabase dos diaristas" autocomplete="off"/>
+      <div class="grid grid-cols-2 gap-2"><input class=${campo+" font-mono text-[12px]"} value=${f.tabela} onInput=${set("tabela")} aria-label="Tabela do cadastro" placeholder="diaristas"/><input class=${campo+" font-mono text-[12px]"} value=${f.historico} onInput=${set("historico")} aria-label="Tabela dos lançamentos" placeholder="historico_diarias"/></div>
+      <div class="flex justify-end"><${BtnSec} disabled=${busy} onClick=${salvar}>${busy?"Testando…":"Salvar e testar"}</${BtnSec}></div>
+      ${msg&&html`<div class="text-[12px]" role="status">${msg}</div>`}
+    </div>`;
+}
+
+function QuadroDiaristas({calc,data,mudar,podeEditar,pode,toast,log=()=>{}}){
+  const hc=calc.dia.hcplan||{};const [txt,setTxt]=useState({});const [sel,setSel]=useState(null);
+  const linhas=calc.nos.filter(n=>!n.folga).map(n=>{const h=hc[n.id];const pedir=h?Math.max(0,-h.delta):n.vagaFixa;
+    const dx=calc.trocas.filter(t=>t.para===n.id&&t.pulmaoId&&t.origem==="extra");return {n,h,pedir,dx}})
+    .filter(x=>x.pedir>0||x.dx.length>0).sort((a,b)=>a.n.hora-b.n.hora||String(a.n.g.code).localeCompare(String(b.n.g.code)));
+  const totPedir=linhas.reduce((s,x)=>s+x.pedir,0),totVieram=linhas.reduce((s,x)=>s+Math.min(x.pedir,x.dx.length),0);
+  const livres=diaristasLivres(calc);const dz=calc.dz;
+  /* pessoas: [{nome,cpf,groot,horario,empresa}] → n */
+  const lancar=pares=>{if(!pares.length)return;const ex=[],tr=[];
+    pares.forEach(([p,n])=>{const e={id:"x"+Date.now().toString(36)+Math.random().toString(36).slice(2,6),nome:p.nome,cpf:p.cpf||"",groot:p.groot||"",empresa:p.empresa||"",hora:n.hora,origem:"extra",diarista:true};ex.push(e);
+      tr.push({id:nidT(),pulmaoId:e.id,pessoaId:null,nome:p.nome,cpf:p.cpf||"",groot:p.groot||"",de:null,para:n.id,origem:"extra",feito:false,diarista:true})});
+    log({tipo:"Pulmão: entrou",nome:pares.map(([p])=>p.nome).join(", "),escala:"diarista",para:[...new Set(pares.map(([,n])=>n.g.code))].join(", "),detalhe:pares.map(([p,n])=>`${p.nome} → ${n.g.code}`).join(" · ")});
+    mudar(x=>({...x,extras:[...(x.extras||[]),...ex],trocas:[...(x.trocas||[]),...tr]}))};
+  const add=n=>{const nomes=String(txt[n.id]||"").split(/[,;\n]+/).map(s=>s.trim()).filter(s=>s.length>1);if(!nomes.length)return;
+    lancar(nomes.map(nm=>{const d=acharDiarista(dz,"",nm);return [d||{nome:nm},n]}));setTxt(s=>({...s,[n.id]:""}))};
+  const distribuir=()=>{const resta={};linhas.forEach(x=>resta[x.n.id]=Math.max(0,x.pedir-x.dx.length));const pares=[];
+    [...livres].sort((a,b)=>(minDe(a.horario)??9999)-(minDe(b.horario)??9999)).forEach(p=>{const ref=horaRef(minDe(p.horario),calc.horas);
+      const cand=linhas.filter(x=>resta[x.n.id]>0&&(ref==null||pode(ref,x.n.hora))).sort((a,b)=>ref==null?0:Math.abs(a.n.hora-ref)-Math.abs(b.n.hora-ref));
+      if(cand[0]){resta[cand[0].n.id]--;pares.push([p,cand[0].n])}});
+    if(!pares.length){toast("Nenhum diarista livre num horário compatível com o quadro.",true);return}
+    lancar(pares);toast(`${pares.length} diarista(s) distribuído(s).`)};
+  const tirar=(t,n)=>{log({tipo:"Troca desfeita",nome:t.nome,escala:"diarista",para:n.g.code});
+    mudar(x=>({...x,trocas:(x.trocas||[]).filter(z=>z.id!==t.id),extras:(x.extras||[]).filter(e=>e.id!==t.pulmaoId),
+      cadeias:(x.cadeias||[]).map(c=>{const i=(c.trocas||[]).indexOf(t.id);return i<0?c:{...c,trocas:c.trocas.slice(0,i)}})}))};
+  const copiar=async()=>{let s=`*PEDIDO DE DIARISTAS – ${fmtData(data)}*\nTotal: ${totPedir}\n`;
+    linhas.filter(x=>x.pedir>0).forEach(x=>{s+=`${x.n.label} · ${x.n.g.code}: ${x.pedir}${x.dx.length?` (vieram ${Math.min(x.pedir,x.dx.length)}: ${x.dx.map(t=>t.nome+(t.groot?" "+t.groot:"")).join(", ")})`:""}\n`});
+    try{await navigator.clipboard.writeText(s);toast("Copiado.")}catch(e){toast("Não deu para copiar aqui.",true)}};
+  const faltaTotal=linhas.reduce((s,x)=>s+Math.max(0,x.pedir-x.dx.length),0);
+  return html`<${Card} className="md:col-span-12" title="Quadro · diaristas" right=${html`<span class="flex items-center gap-2"><${Pill} tom=${totVieram<totPedir?"red":"green"}>${totVieram} de ${totPedir} diarista(s)</${Pill}>${totPedir>0&&html`<${BtnMini} onClick=${copiar}>Copiar pedido</${BtnMini}>`}</span>`}>
+    <div class="text-[12px] text-muted mb-3 max-w-3xl">${Object.keys(hc).length?"O que falta no quadro de cada escala (Delta HC da HC_PLAN) é pedido para diarista.":"O que falta no quadro de cada escala é pedido para diarista. Toque em Puxar da planilha para usar o Delta da HC_PLAN."} Os ABS do dia ficam para as pessoas do sistema, no cartão de cadeia logo abaixo.</div>
+    ${dz&&dz.ok?html`<div class="rounded-2xl border border-line p-3 mb-3" style=${{background:"var(--wash)"}}>
+        <div class="flex items-center gap-2 flex-wrap mb-2"><span class="text-[11px] uppercase tracking-[.14em] text-muted font-semibold">Diaristas lançados no dia</span>
+          <${Pill} tom=${livres.length?"amber":"green"}>${livres.length} livre(s) de ${dz.dia.length}</${Pill}>
+          ${podeEditar&&livres.length>0&&faltaTotal>0&&html`<span class="ml-auto"><${BtnPrim} onClick=${distribuir}>Distribuir no quadro</${BtnPrim}></span>`}</div>
+        ${!dz.dia.length?html`<div class="text-[12px] text-muted">Nenhum diarista lançado nesse dia no Controle de Diaristas.${dz.erroDia?" ("+dz.erroDia+")":""}</div>`
+        :livres.length?html`<div class="text-[11px] text-muted mb-1.5">${sel?html`Agora toque em <b class="text-ink">Pôr aqui</b> na escala de <b class="text-ink">${sel.nome}</b>.`:"Toque num diarista e depois na escala, ou use Distribuir no quadro (pelo horário de entrada)."}</div>
+          <div class="flex flex-wrap gap-1.5">${livres.map(p=>html`<${Mini} key=${p.cpf||p.nome} ativo=${sel&&sel.nome===p.nome} tom="accent" label=${"Escolher "+p.nome} onClick=${()=>setSel(sel&&sel.nome===p.nome?null:p)}>${p.nome}${p.horario?" · "+p.horario:""}</${Mini}>`)}</div>`
+        :html`<div class="text-[12px]" style=${{color:"var(--green)"}}>✓ Todos os diaristas do dia já estão numa escala.</div>`}
+      </div>`:dz&&dz.erro?html`<div class="text-[12px] mb-3" style=${{color:"var(--amber)"}}>Banco de diaristas: ${dz.erro}</div>`
+      :html`<div class="text-[12px] text-muted mb-3">Ligue o banco de diaristas em ⚙ Configurações para o painel reconhecer quem é diarista e quem foi lançado no dia.</div>`}
+    ${!linhas.length?html`<div class="text-[13px]" style=${{color:"var(--green)"}}>✓ Nenhuma escala com quadro a menos neste dia.</div>`:html`<div class="grid grid-cols-1 lg:grid-cols-2 gap-2">${linhas.map(({n,h,pedir,dx})=>{const falta=Math.max(0,pedir-dx.length);
+      const okSel=sel&&(()=>{const r=horaRef(minDe(sel.horario),calc.horas);return r==null||pode(r,n.hora)})();
+      return html`<div key=${n.id} class="rounded-2xl border border-line p-3" style=${{background:"var(--wash)"}}>
+        <div class="flex items-center gap-2 flex-wrap"><b class="font-display tnum text-[15px]">${n.g.code}</b><span class="text-[12px] text-muted">${n.label}${h?` · planejado ${h.planejado} · atual ${h.atual}`:` · HC ${n.hc} de ${n.precisa}`}${h&&(h.ferias||h.inss)?` · ${h.ferias?h.ferias+" férias ":""}${h.inss?h.inss+" INSS":""}`:""}</span>
+          <span class="ml-auto"><${Pill} tom=${falta?"red":"green"}>${falta?`pedir ${falta}`:"✓ coberto"}</${Pill}></span></div>
+        ${dx.length>0&&html`<div class="flex flex-wrap gap-1.5 mt-2">${dx.map(t=>{const d=acharDiarista(dz,t.cpf,t.nome);return html`<span key=${t.id} title=${d?rotDz(d):"não está no banco de diaristas"} class="inline-flex items-center gap-1 text-[12px] font-medium pl-2.5 pr-1 py-0.5 rounded-full" style=${{background:fundoTom(d?"green":"amber"),color:corTom(d?"green":"amber")}}>${t.nome}${d&&d.groot?html`<span class="font-mono opacity-70">${d.groot}</span>`:dz&&dz.ok&&!d?" ⚠":""}${podeEditar&&html`<button type="button" aria-label=${"Tirar "+t.nome} onClick=${()=>tirar(t,n)} class="w-5 h-5 rounded-full hover:bg-[var(--wash)]">✕</button>`}</span>`})}</div>`}
+        ${podeEditar&&falta>0&&sel&&html`<div class="mt-2"><${BtnPrim} disabled=${!okSel} onClick=${()=>{lancar([[sel,n]]);setSel(null)}}>${okSel?`Pôr ${sel.nome.split(" ")[0]} aqui`:"horário incompatível"}</${BtnPrim}></div>`}
+        ${podeEditar&&falta>0&&!sel&&html`<div class="flex gap-2 mt-2"><input class=${campo+" !py-2 text-[13px]"} list="dz-dia" value=${txt[n.id]||""} onInput=${e=>{const v=e.target.value;setTxt(s=>({...s,[n.id]:v}))}} onKeyDown=${e=>{if(e.key==="Enter")add(n)}} placeholder="Nome do diarista que veio" aria-label=${"Diarista para "+n.g.code} autocomplete="off"/><${BtnPrim} disabled=${!String(txt[n.id]||"").trim()} onClick=${()=>add(n)}>Atribuir</${BtnPrim}></div>`}
+      </div>`})}</div>`}
+    <datalist id="dz-dia">${livres.map(p=>html`<option key=${p.cpf||p.nome} value=${p.nome}/>`)}</datalist>
+    ${dz&&dz.ok&&(()=>{const nomes=linhas.flatMap(x=>x.dx).filter(t=>!acharDiarista(dz,t.cpf,t.nome));return nomes.length?html`<div class="text-[12px] mt-2" style=${{color:"var(--amber)"}}>⚠ Não estão no banco de diaristas: ${nomes.map(t=>t.nome).join(", ")}. Cadastre no Controle de Diaristas.</div>`:null})()}
   </${Card}>`;
 }
 
@@ -865,28 +1296,61 @@ function CoberturaView({escalas,historico,versao,regrasNuvem,podeEditar,toast,ca
   const uso={};calc.trocas.forEach(t=>{if(t.pulmaoId)uso[t.pulmaoId]="lançado na "+(byId[t.para]?byId[t.para].g.code:"?")});
   res.cadeias.forEach(c=>{const ult=c.passos[c.passos.length-1];if(ult&&ult.extra&&!uso[ult.pessoa.id])uso[ult.pessoa.id]="sugerido → "+rot(ult.para)});
   const porHora={};nos.forEach(n=>(porHora[n.hora]??=[]).push(n));
-  const [verQuadro,setVerQuadro]=useState(false);
+  const [verQuadro,setVerQuadro]=useState(false);const [bump,setBump]=useState(0);
+  const [puxando,setPuxando]=useState(false);const tentados=useRef(new Set());
+  const [dz,setDz]=useState(null);
+  useEffect(()=>{let vivo=true;lerChave(K_DZ).then(c=>{if(!c||!c.key){if(vivo)setDz(null);return}
+      return lerDiaristas(c,data).then(r=>{if(vivo)setDz(r)}).catch(e=>{if(vivo)setDz({ok:false,erro:e.message||String(e),banco:[],dia:[]})})}).catch(()=>{});
+    return()=>{vivo=false}},[data,versao]);
+  calc.dz=dz;
+  const puxar=async(auto)=>{if(!podeEditar)return;setPuxando(true);
+    try{const cfg=await cfgPlanilha();
+      if(!cfg||!cfg.url){if(!auto)toast("Cole o link da planilha (Apps Script) em ⚙ Configurações.",true);return}
+      const r=await chamarPlanilha(cfg,data);if(!r||!r.ok)throw new Error(r&&r.erro||"A planilha não respondeu");
+      const x=aplicarPlanilha(dia,r,escalas);mudar(d=>aplicarPlanilha(d,r,escalas).dia);
+      log({tipo:"Planilha puxada",nome:"Headcount KN 2026",detalhe:`${r.abs.length} ABS (${x.nAbs} novos) · ${x.nFolga} escala(s) de folga · quadro de ${Object.keys(x.dia.hcplan).length} escala(s)${x.naoAchados.length?" · não achados no HC: "+x.naoAchados.map(a=>a.nome).join(", "):""}`});
+      toast(`Planilha: ${r.abs.length} ABS${x.nAbs?` (${x.nAbs} novos)`:""}${x.nFolga?` · ${x.nFolga} escala(s) de folga`:""}${r.colunaDoDia?"":" · sem coluna desse dia na Presença KN"}.`)}
+    catch(e){toast("Não deu para puxar da planilha: "+(e.message||e),true)}
+    finally{setPuxando(false)}};
+  useEffect(()=>{if(!ok||!podeEditar||dia.planilha||tentados.current.has(data))return;if(difDias(hojeISO(),data)>PRAZO_DIAS||difDias(data,hojeISO())>0)return;
+    tentados.current.add(data);puxar(true)},[ok,data]);
+  const importarMeli=async porData=>{try{let tot=0;const fol=[];const ds=Object.keys(porData).sort();
+    for(const d of ds){
+      if(d===data){const r=mesclarPend(dia,porData[d],escalas);tot+=r.novas;fol.push(...r.folgas.map(c=>c+" em "+dm(d)));mudar(x=>mesclarPend(x,porData[d],escalas).dia)}
+      else{const atual=await lerChave(K_DIA+d);const r=mesclarPend(atual,porData[d],escalas);tot+=r.novas;fol.push(...r.folgas.map(c=>c+" em "+dm(d)));
+        if(r.novas)await salvarChave(K_DIA+d,{...r.dia,em:new Date().toISOString()})}}
+    if(podeEditar)registrar({area:"cobertura",dia:ds[0],tipo:"Pendências importadas",nome:`${tot} pendência(s) da Meli`,detalhe:ds.map(d=>dm(d)+": "+porData[d].length).join(" · ")+(fol.length?" · escala de folga: "+fol.join(", "):"")}).then(()=>window.dispatchEvent(new Event("kn-historico"))).catch(()=>{});
+    setBump(b=>b+1);toast(`${tot} pendência(s) importada(s) em ${ds.length} dia(s).`);
+    if(!porData[data]&&ds.length)setTimeout(()=>trocarData(ds[0]),50);
+    return true}catch(e){toast("Não foi possível importar: "+(e.message||e),true);return false}};
   if(carregando)return html`<div class="grid gap-4"><div class="glass rounded-3xl p-6 h-48"><div class="sk h-full w-full"></div></div></div>`;
   if(!nos.length)return html`<${Card} title="Cobertura"><div class="text-[14px] text-muted">Ainda não tem escalas na nuvem. Importe os dados em ⚙ Configurações.</div></${Card}>`;
   const stat=(v,l,tom)=>html`<div class="min-w-0"><div class="font-display text-2xl sm:text-3xl tnum" style=${{color:tom?corTom(tom):"var(--ink)"}}>${v}</div><div class="text-muted text-xs mt-1">${l}</div></div>`;
   const pz=prazoDe(data);
   return html`<${motion.div} key="cob" initial=${{opacity:0,y:8}} animate=${{opacity:1,y:0}} exit=${{opacity:0}} transition=${{duration:.2}} class="grid grid-cols-1 md:grid-cols-12 gap-4 items-start">
-    <${Panorama} escalas=${escalas} saidas=${saidas} pode=${pode} data=${data} diaAtual=${ok?dia:null} setData=${trocarData} versao=${versao}/>
+    <${Panorama} escalas=${escalas} saidas=${saidas} pode=${pode} data=${data} diaAtual=${ok?dia:null} setData=${trocarData} versao=${versao+bump}/>
     ${!ok?html`<div class="md:col-span-12 glass rounded-3xl p-6 h-48"><div class="sk h-full w-full"></div></div>`:html`
     <${Card} className="md:col-span-12">
       <div class="flex items-start justify-between gap-4 flex-wrap">
         <div class="min-w-0">
           <div class="text-[11px] uppercase tracking-[.16em] text-muted font-semibold">Cobertura · ${semanaDe(data)} ${fmtData(data)}</div>
-          <h1 class="font-display text-3xl sm:text-5xl tracking-tight mt-2" style=${{color:calc.abertos?"var(--red)":calc.pend?"var(--amber)":"var(--green)"}}>${calc.abertos?`${calc.abertos} furo${calc.abertos>1?"s":""} em aberto`:calc.pend?"Falta atribuir na Meli":"Quadro fechado"}</h1>
+          <h1 class="font-display text-3xl sm:text-5xl tracking-tight mt-2" style=${{color:calc.abertos?"var(--red)":calc.pend+calc.pendMeli?"var(--amber)":"var(--green)"}}>${calc.abertos?`${calc.abertos} furo${calc.abertos>1?"s":""} em aberto`:calc.pend+calc.pendMeli?"Falta atribuir na Meli":"Quadro fechado"}</h1>
           <div class="text-[13px] text-muted mt-2 max-w-xl">Lance os ABS e as trocas do dia. Para cada furo, o painel mostra quem pode cobrir num horário compatível.</div>
-          <div class="mt-2"><${Pill} tom=${pz.tom}>${pz.txt}</${Pill}></div>
+          <div class="mt-2 flex items-center gap-2 flex-wrap"><${Pill} tom=${pz.tom}>${pz.txt}</${Pill}>
+            ${podeEditar&&html`<${BtnMini} disabled=${puxando} onClick=${()=>puxar(false)}>${puxando?"Puxando…":"↻ Puxar da planilha"}</${BtnMini}>`}
+            ${dz&&dz.ok&&html`<span class="text-[11px] text-muted">${dz.dia.length} diarista(s) lançado(s) no dia</span>`}
+            ${dia.planilha&&html`<span class="text-[11px] text-muted">planilha puxada às ${new Date(dia.planilha.em).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})} · ${dia.planilha.abs} ABS${dia.planilha.colunaDoDia?"":" (sem coluna do dia na Presença KN)"}</span>`}</div>
+          ${dia.planilha&&dia.planilha.naoAchados&&dia.planilha.naoAchados.length>0&&html`<div class="text-[12px] mt-2" style=${{color:"var(--amber)"}}>ABS da planilha que não estão no HC do painel: ${dia.planilha.naoAchados.map(a=>a.nome+(a.antiga?" ("+a.antiga+")":"")).join(", ")}</div>`}
         </div>
         <label class="text-[11px] text-muted grid gap-1">Dia<input id="cob-data" type="date" value=${data} onChange=${e=>trocarData(e.target.value)} class=${campo+" !w-auto tnum"}/></label>
       </div>
       <div class="grid grid-cols-3 sm:grid-cols-6 gap-4 mt-6">
-        ${stat(vagasFixas,"a menos (fixo)",vagasFixas?"red":null)}${stat(abs,"ABS do dia",abs?"red":null)}${stat(calc.trocas.length,"trocas","accent")}${stat(calc.abertos,"furos abertos",calc.abertos?"red":"green")}${stat(calc.pend,"p/ atribuir",calc.pend?"amber":null)}${stat(pulmao.length,"livres no pulmão","amber")}
+        ${stat(vagasFixas,"a menos (fixo)",vagasFixas?"red":null)}${stat(abs,"ABS do dia",abs?"red":null)}${stat(calc.trocas.length,"trocas","accent")}${stat(calc.abertos,"furos abertos",calc.abertos?"red":"green")}${stat(calc.pend+calc.pendMeli,"p/ atribuir",calc.pend+calc.pendMeli?"amber":null)}${stat(pulmao.length,"livres no pulmão","amber")}
       </div>
     </${Card}>
+    <${QuadroDiaristas} calc=${calc} data=${data} mudar=${mudar} podeEditar=${podeEditar} pode=${pode} toast=${toast} log=${log}/>
+    <${CadeiaABS} calc=${calc} data=${data} mudar=${mudar} podeEditar=${podeEditar} pode=${pode} toast=${toast} log=${log}/>
+    <${PendenciasMeli} calc=${calc} data=${data} mudar=${mudar} escalas=${escalas} pode=${pode} podeEditar=${podeEditar} toast=${toast} log=${log} onImportar=${importarMeli}/>
     <div class="md:col-span-6 grid gap-4 min-w-0">
       <${Lancar} calc=${calc} mudar=${mudar} podeEditar=${podeEditar} log=${log}/>
       <${Pulmao} dia=${dia} mudar=${mudar} horas=${horas} podeEditar=${podeEditar} todos=${todos} pode=${pode} uso=${uso} presentesIds=${presentesIds} log=${log}/>
@@ -952,6 +1416,21 @@ function HistoricoView({historico,escalas,podeEditar,ops}){
   </${motion.div}>`;
 }
 
+function CfgPlanilha(){
+  const [url,setUrl]=useState("");const [chave,setChave]=useState("");const [msg,setMsg]=useState("");const [busy,setBusy]=useState(false);
+  useEffect(()=>{cfgPlanilha().then(c=>{setUrl(c.url||"");setChave(c.chave||"")}).catch(()=>{})},[]);
+  const salvar=async()=>{setBusy(true);setMsg("");try{await salvarChave(K_SHEETS,{url:url.trim(),chave:chave.trim(),em:new Date().toISOString()});
+      if(url.trim()){setMsg("Salvo. Testando…");const r=await chamarPlanilha({url,chave},hojeISO());setMsg(r&&r.ok?`✓ Funcionando: hoje tem ${r.abs.length} ABS, quadro de ${r.hcplan.length} escala(s), ${r.folgas.length} escala(s) de folga.`:"Salvo, mas a planilha respondeu: "+(r&&r.erro||"erro"))}else setMsg("Salvo.")}
+    catch(e){setMsg("Salvo, mas o teste falhou: "+(e.message||e))}finally{setBusy(false)}};
+  return html`<div class="text-[11px] uppercase tracking-[.16em] text-muted font-semibold mt-5 mb-2">Planilha Headcount KN 2026 (Apps Script)</div>
+    <div class="text-[12px] text-muted mb-2">Link do App da Web (termina em /exec) e a chave que está no Code.gs. Vale para todos que usam o painel.</div>
+    <div class="grid gap-2">
+      <input class=${campo+" font-mono text-[12px]"} value=${url} onInput=${e=>setUrl(e.target.value)} placeholder="https://script.google.com/macros/s/…/exec" aria-label="Link do Apps Script"/>
+      <input class=${campo+" font-mono text-[12px]"} value=${chave} onInput=${e=>setChave(e.target.value)} placeholder="Chave" aria-label="Chave do Apps Script" autocomplete="off"/>
+      <div class="flex justify-end"><${BtnSec} disabled=${busy} onClick=${salvar}>${busy?"Testando…":"Salvar e testar"}</${BtnSec}></div>
+      ${msg&&html`<div class="text-[12px]" role="status">${msg}</div>`}
+    </div>`;
+}
 function Config({onClose,escalas,historico,onImportado,toast}){
   const c0=getCfg();const [url,setUrl]=useState(c0.url);const [key,setKey]=useState(c0.key);
   const [arq,setArq]=useState(null);const [busy,setBusy]=useState(false);const [msg,setMsg]=useState("");
@@ -984,6 +1463,8 @@ function Config({onClose,escalas,historico,onImportado,toast}){
         <div class="text-[12px] mt-1" style=${{color:"var(--amber)"}}>As escalas com o mesmo código na nuvem serão substituídas pelas do arquivo.</div>
         <div class="flex justify-end gap-2 mt-3"><${BtnSec} onClick=${()=>setArq(null)}>Cancelar</${BtnSec}><${BtnPrim} disabled=${busy} onClick=${importar}>${busy?"Importando…":"Importar e substituir"}</${BtnPrim}></div>
       </div>`}
+      <${CfgPlanilha}/>
+      <${CfgDiaristas}/>
       <div class="text-[11px] uppercase tracking-[.16em] text-muted font-semibold mt-5 mb-2">Conexão com a nuvem (Supabase)</div>
       <div class="grid gap-2">
         <input class=${campo+" font-mono text-[12px]"} value=${url} onInput=${e=>setUrl(e.target.value)} placeholder="https://xxxx.supabase.co" aria-label="Endereço do Supabase"/>
