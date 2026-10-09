@@ -624,6 +624,8 @@ const passoDe=(p,rot)=>p.extra?`pulmão (${ORIGEM[p.origem]||"extra"}${p.hora!=n
 
 /* ---- cálculo de um dia (quadro, opções e panorama) ---- */
 const PRAZO_DIAS=5;
+/* os cards de "Furos dos últimos dias" só contam a partir deste dia (início do uso do painel) */
+const INICIO_CONTAGEM="2026-10-08";
 const isoDe=t=>`${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,"0")}-${String(t.getDate()).padStart(2,"0")}`;
 const addDias=(iso,n)=>{const [a,m,d]=iso.split("-").map(Number);return isoDe(new Date(a,m-1,d+n))};
 const difDias=(a,b)=>Math.round((new Date(a+"T12:00:00")-new Date(b+"T12:00:00"))/864e5);
@@ -825,14 +827,14 @@ function Sugestao({calc,rot,mudar,podeEditar,log=()=>{}}){
 }
 
 function Panorama({escalas,saidas,pode,data,diaAtual,setData,versao}){
-  const dias=useMemo(()=>{const h=hojeISO();return Array.from({length:8},(_,i)=>addDias(h,i-7))},[versao]);
+  const dias=useMemo(()=>{const h=hojeISO();const out=[];for(let i=7;i>=0;i--){const d=addDias(h,-i);if(d>=INICIO_CONTAGEM)out.push(d)}return out},[versao]);
   const [salvos,setSalvos]=useState({});
   useEffect(()=>{let vivo=true;(async()=>{try{const c=await nuvem();const {data:rows,error}=await c.from(TABELA).select("state_key,payload").in("state_key",dias.map(d=>K_DIA+d));
     if(!error&&vivo){const m={};(rows||[]).forEach(r=>m[r.state_key.slice(K_DIA.length)]=r.payload);setSalvos(m)}}catch(e){}})();return()=>{vivo=false}},[dias,versao]);
   useEffect(()=>{if(diaAtual)setSalvos(m=>m[data]===diaAtual?m:{...m,[data]:diaAtual})},[diaAtual,data]);
   const linhas=useMemo(()=>dias.map(d=>{const st=d===data?diaAtual:salvos[d];const c=calcularDia(escalas,st,saidas,pode);return {d,conf:!!st,c,pz:prazoDe(d)}}),[dias,salvos,data,diaAtual,escalas,saidas,pode]);
   const alerta=linhas.filter(l=>l.pz.r>=0&&(l.c.abertos>0||l.c.pend>0||l.c.pendMeli>0||!l.conf));
-  return html`<${Card} className="md:col-span-12" title="Furos dos últimos dias" right=${html`<span class="text-[12px] text-muted">prazo de ${PRAZO_DIAS} dias para atribuir</span>`}>
+  return html`<${Card} className="md:col-span-12" title=${dias.length>1?"Furos dos últimos dias":"Furos do dia"} right=${html`<span class="text-[12px] text-muted">prazo de ${PRAZO_DIAS} dias para atribuir</span>`}>
     <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">${linhas.map(l=>{
       const {c}=l;const st=!l.conf?{tom:"muted",t:"não conferido"}:c.abertos>0?{tom:"red",t:`${c.abertos} furo(s) aberto(s)`}:c.pend+c.pendMeli>0?{tom:"amber",t:`${c.pend+c.pendMeli} p/ atribuir`}:{tom:"green",t:c.trocas.length?"coberto":"sem furos"};
       const sel=l.d===data;
