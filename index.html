@@ -941,7 +941,7 @@ function CadeiaABS({calc,data,mudar,podeEditar,pode,toast,log=()=>{}}){
       cadeias:(x.cadeias||[]).map(z=>z.id===c.id?{...z,trocas:ids.slice(0,-1)}:z)}))};
   const tirar=c=>{const ids=new Set(c.trocas||[]);log({tipo:"Falta desmarcada",nome:c.nome,cpf:c.cpf,escala:code(c.gid),detalhe:"ABS por nome retirado"});
     mudar(x=>({...x,ausentes:{...x.ausentes,[c.gid]:(x.ausentes[c.gid]||[]).filter(i=>i!==c.pessoaId)},trocas:(x.trocas||[]).filter(z=>!ids.has(z.id)),
-      extras:(x.extras||[]).filter(e=>e.cadeia!==c.id),cadeias:(x.cadeias||[]).filter(z=>z.id!==c.id)}))};
+      extras:(x.extras||[]).filter(e=>e.cadeia!==c.id),cadeias:(x.cadeias||[]).filter(z=>z.id!==c.id),planilhaRetirados:c.planilha?[...new Set([...(x.planilhaRetirados||[]),c.pessoaId])]:(x.planilhaRetirados||[])}))};
   const estados=cadeias.map(c=>passosCadeia(c,calc));const abertas=estados.filter(s=>s.estado==="aberta").length;
   const texto=()=>{let s=`*ABS – ${fmtData(data)}*\n`;cadeias.forEach((c,i)=>{const st=estados[i];let ant=c.nome;
     s+=`\n${i+1}) ${c.nome}${c.cpf?" — "+c.cpf:""} — ${code(c.gid)} (${lab(c.gid)}) — AUSENTE\n`;
@@ -1160,8 +1160,14 @@ function acharEscala(escalas,antiga,turno){
   const t=chaveT(turno);return t?escalas.find(x=>chaveT(x.turno)===t)||null:null;
 }
 /* aplica no dia: escalas de folga, "precisa" pelo quadro da HC_PLAN e os ABS (F/AT) com cadeia de cobertura */
+const pegaAbs=(a,...ks)=>{if(!a||typeof a!=="object")return "";for(const k of ks){if(a[k]!=null&&String(a[k]).trim()!=="")return String(a[k]).trim()}const mapa=Object.fromEntries(Object.entries(a).map(([k,v])=>[norm(k).replace(/[^a-z0-9]/g,""),v]));for(const k of ks){const v=mapa[norm(k).replace(/[^a-z0-9]/g,"")];if(v!=null&&String(v).trim()!=="")return String(v).trim()}return ""};
+function normAbs(a){if(Array.isArray(a))a={nome:a[0],cpf:a[1],codigo:a[2],turno:a[3],groot:a[4]};if(typeof a==="string")a={nome:a};a=a||{};
+  return {...a,nome:pegaAbs(a,"nome","Nome","NOME","nome completo","colaborador","Colaborador","COLABORADOR","funcionario","funcionário","name","pessoa","employee","nome_colaborador","nomeFuncionario","nome_funcionario","full_name","fullName"),groot:pegaAbs(a,"groot","groot id","groot_id","grootId","id colaborador","id_colaborador","matricula","matrícula"),cpf:pegaAbs(a,"cpf","CPF","Cpf","documento"),
+    antiga:pegaAbs(a,"antiga","escala","Escala","ESCALA","codigoEscala"),codigo:pegaAbs(a,"codigo","código","Codigo","status","Status","cod","tipo","motivo").toUpperCase(),
+    turno:pegaAbs(a,"turno","Turno"),hora:pegaAbs(a,"horario","Horário","hora","entrada").slice(0,5),linha:pegaAbs(a,"linha","row","Linha")}}
 function aplicarPlanilha(dia,r,escalas){
-  dia={...DIA_VAZIO,...(dia||{})};
+  dia={...DIA_VAZIO,...(dia||{})};r={...r,abs:(r.abs||[]).map(normAbs)};
+  try{const bruto=r._absBruto||[];const sem=r.abs.map((a,i)=>(!a.nome&&!a.cpf)?bruto[i]:null).filter(x=>x!=null);if(sem.length)console.warn("[Painel KN] ABS da planilha sem nome/CPF ("+sem.length+"):",JSON.stringify(sem.slice(0,5)))}catch(_){}
   const ops=escalas.filter(g=>g.tipo!=="cargo"&&rotuloTurno(g.turno));
   const folga={...dia.folga},precisa={...dia.precisa},aus={...dia.ausentes},cad=[...(dia.cadeias||[])],hc={};
   const movidos=new Set((dia.trocas||[]).filter(t=>t.pessoaId&&!t.pulmaoId).map(t=>t.pessoaId));
@@ -1170,15 +1176,93 @@ function aplicarPlanilha(dia,r,escalas){
   ops.forEach(g=>{const k=chaveT(g.turno);if((fol.has(k)||sem[k]===0)&&!folga[g._id]){folga[g._id]=true;nFolga++}});
   (r.hcplan||[]).forEach(h=>{const g=acharEscala(ops,h.antiga,h.turno);if(!g)return;hc[g._id]={planejado:h.planejado,atual:h.atual,delta:h.delta,ferias:h.ferias,inss:h.inss};
     if(!folga[g._id])precisa[g._id]=Math.max(0,(g.pessoas||[]).length-h.delta)});
-  const naoAchados=[];let nAbs=0;
-  (r.abs||[]).forEach(a=>{const h=acharNoHC(ops,a.cpf,a.nome);
-    if(!h){naoAchados.push({nome:a.nome,cpf:a.cpf,antiga:a.antiga,codigo:a.codigo});return}
-    if(folga[h.g._id]||movidos.has(h.p.id))return;
+  const naoAchados=[],ignorados=[];let nAbs=0;const retirados=new Set(dia.planilhaRetirados||[]);
+  const naPlan=new Map();
+  const escDeTurno=t=>{const k=chaveT(t);if(!k)return null;let g=ops.find(x=>chaveT(x.turno)===k);
+    if(!g){const hp=(r.hcplan||[]).find(x=>chaveT(x.turno)===k);if(hp)g=ops.find(x=>String(x.code).trim()===String(hp.antiga).trim())||null}return g||null};
+  const semId=[];
+  const buscarPorGroot=a=>{const id=String(a.groot||"").trim();if(!id)return null;const achados=[];ops.forEach(g=>(g.pessoas||[]).forEach(p=>{if([p.groot,p.grootId,p.groot_id,p.matricula,p.matrícula].some(v=>v!=null&&String(v).trim()===id))achados.push({g,p})}));return achados.length===1?achados[0]:null};
+  (r.abs||[]).forEach(a=>{const porId=buscarPorGroot(a);if(porId&&!a.nome)a.nome=porId.p.nome;if(porId&&!a.cpf)a.cpf=porId.p.cpf||"";if(!a.nome&&!a.cpf){semId.push(a);return}const h=porId||acharNoHC(ops,a.cpf,a.nome);
+    if(h)naPlan.set(h.p.id,a.codigo||"");
+    if(!h){naoAchados.push({nome:a.nome,cpf:a.cpf,antiga:a.antiga,codigo:a.codigo,turno:a.turno,linha:a.linha,groot:a.groot});return}
+    if(folga[h.g._id]){ignorados.push({nome:h.p.nome,codigo:a.codigo,motivo:"escala "+h.g.code+" marcada de folga"});return}
+    if(movidos.has(h.p.id)){ignorados.push({nome:h.p.nome,codigo:a.codigo,motivo:"já foi movido(a) numa troca"});return}
+    if(retirados.has(h.p.id)){ignorados.push({nome:h.p.nome,codigo:a.codigo,motivo:"ABS retirado à mão no painel"});return}
     const s=new Set(aus[h.g._id]||[]);if(!s.has(h.p.id)){s.add(h.p.id);aus[h.g._id]=[...s];nAbs++}
     if(!cad.some(c=>c.pessoaId===h.p.id))cad.push({id:"c"+Date.now().toString(36)+Math.random().toString(36).slice(2,6),pessoaId:h.p.id,nome:h.p.nome,cpf:h.p.cpf||"",gid:h.g._id,trocas:[],motivo:a.codigo,planilha:true})});
-  return {dia:{...dia,folga,precisa,ausentes:aus,cadeias:cad,hcplan:hc,planilha:{em:new Date().toISOString(),abs:(r.abs||[]).length,naoAchados,colunaDoDia:r.colunaDoDia!==false,quadro:Object.keys(hc).length}},nAbs,nFolga,naoAchados};
+  semId.forEach(a=>{const g=escDeTurno(a.turno);
+    if(g){const ja=(aus[g._id]||[]).filter(id=>!naPlan.has(id));
+      const mesmoCod=ja.find(id=>{const c=cad.find(z=>z.pessoaId===id);return c&&c.motivo===a.codigo});const id=mesmoCod||ja[0];
+      if(id){naPlan.set(id,a.codigo||"");return}}
+    naoAchados.push({nome:"",cpf:"",antiga:g?g.code:"",gid:g?g._id:"",turno:a.turno,hora:a.hora,codigo:a.codigo,groot:a.groot,linha:a.linha})});
+  /* trava: se a marcação do dia despencar de uma vez (planilha quebrada), não remove nada e alerta */
+  const marcas=c=>c&&typeof c==="object"?Object.entries(c).filter(([k])=>String(k).trim().toUpperCase()!=="FO").reduce((t,[,v])=>t+(Number(v)||0),0):null;
+  const prevPl=dia.planilha||{};const ref=prevPl.ref!=null?prevPl.ref:marcas(prevPl.contagem);const agoraM=marcas(r.contagem);
+  const suspeita=ref!=null&&agoraM!=null&&ref>=20&&agoraM<ref*0.5;
+  const alerta=suspeita?{desde:(prevPl.alerta&&prevPl.alerta.desde)||new Date().toISOString(),boaEm:(prevPl.alerta&&prevPl.alerta.boaEm)||prevPl.em||null,antes:ref,agora:agoraM}:null;
+  /* sincroniza: ABS que veio da planilha e não está mais lá (trocaram por presença) sai do painel */
+  const removidos=[];let trocasF=[...(dia.trocas||[])],extrasF=[...(dia.extras||[])],cadF=cad;
+  if(!suspeita&&semId.length===0&&r.colunaDoDia!==false&&Array.isArray(r.abs)){
+    cadF=cad.filter(c=>{if(!c.planilha||naPlan.has(c.pessoaId))return true;
+      removidos.push({nome:c.nome,cpf:c.cpf||"",gid:c.gid,trocas:(c.trocas||[]).length,motivo:c.motivo||""});
+      aus[c.gid]=(aus[c.gid]||[]).filter(i=>i!==c.pessoaId);
+      const ids=new Set(c.trocas||[]);trocasF=trocasF.filter(z=>!ids.has(z.id));extrasF=extrasF.filter(e=>e.cadeia!==c.id);return false});
+    cadF=cadF.map(c=>c.planilha&&naPlan.get(c.pessoaId)&&naPlan.get(c.pessoaId)!==c.motivo?{...c,motivo:naPlan.get(c.pessoaId)}:c);
+  }
+  return {dia:{...dia,folga,precisa,ausentes:aus,cadeias:cadF,trocas:trocasF,extras:extrasF,hcplan:hc,planilha:{em:new Date().toISOString(),abs:suspeita?(prevPl.abs||0):(r.abs||[]).length,contagem:suspeita?(prevPl.contagem||null):(r.contagem||null),ref:suspeita?ref:agoraM,alerta,naoAchados:suspeita?(prevPl.naoAchados||[]):naoAchados,ignorados,colunaDoDia:r.colunaDoDia!==false,quadro:Object.keys(hc).length,semIdentificacao:semId.length}},nAbs,nFolga,naoAchados,ignorados,removidos,alerta,alertaNovo:!!(alerta&&!prevPl.alerta),recuperou:!!(!alerta&&prevPl.alerta)};
 }
 
+/* ---- alerta: planilha quebrada ---- */
+function AlertaPlanilha({pl}){
+  const a=pl&&pl.alerta;
+  useEffect(()=>{const base=document.title.replace(/^⚠ /,"");document.title=a?"⚠ "+base:base;return()=>{document.title=document.title.replace(/^⚠ /,"")}},[!!a]);
+  if(!a)return null;
+  const hh=iso=>iso?new Date(iso).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}):"—";
+  return html`<div role="alert" class="mt-4 rounded-2xl p-4 flex gap-3 items-start" style=${{background:"rgba(239,68,68,.12)",border:"1px solid var(--red)"}}>
+    <span class="text-2xl leading-none">⚠</span>
+    <div class="min-w-0 text-[13px]">
+      <div class="font-semibold" style=${{color:"var(--red)"}}>A planilha parece quebrada desde as ${hh(a.desde)}</div>
+      <div class="mt-1">A marcação de hoje na aba <b>Preseça KN</b> caiu de <b class="tnum">${a.antes}</b> para <b class="tnum">${a.agora}</b> de uma vez. O painel <b>não apagou nenhum ABS</b> e está mostrando a última leitura boa (${hh(a.boaEm)}).</div>
+      <div class="text-muted mt-1">Confira a planilha (Arquivo → Histórico de versões). Quando ela voltar ao normal, o painel atualiza sozinho e este aviso some.</div>
+    </div></div>`;
+}
+/* ---- ABS DA PLANILHA: fixo (INSS) + total do dia, com lista que abre ---- */
+function AbsPlanilha({nos,dia}){
+  const [aberto,setAberto]=useState(false);
+  const pl=dia.planilha;const mot={};(dia.cadeias||[]).forEach(c=>{if(c.motivo)mot[c.pessoaId]=c.motivo});
+  const hhmm=t=>{const m=String(t||"").match(/(\d{1,2})H/i);return m?m[1].padStart(2,"0")+":00":""};
+  const sigla=t=>{const m=String(t||"").toUpperCase().match(TURNO_RE);return m?m[1]:""};
+  const comNome=nos.flatMap(n=>(n.ausentes||[]).map(p=>({nome:p.nome,cod:mot[p.id]||"",esc:n.g.code,sig:sigla(n.g.turno),hora:hhmm(n.g.turno)})));
+  const semNome=[...((pl&&pl.naoAchados)||[]),...((pl&&pl.ignorados)||[])].map(a=>({nome:a.nome||"",cod:a.codigo||"",esc:a.antiga||"",sig:sigla(a.turno),hora:a.hora||hhmm(a.turno)}));
+  const cont=(pl&&pl.contagem)||{};const inss=Number(cont.INSS||cont.inss||0);
+  const lista=[...comNome,...semNome].sort((x,y)=>(x.hora||"99").localeCompare(y.hora||"99")||String(x.esc).localeCompare(String(y.esc)));
+  if(!lista.length&&!inss)return null;
+  const nAT=lista.filter(x=>x.cod==="AT").length,nF=lista.filter(x=>x.cod==="F").length,nOut=lista.length-nAT-nF;
+  const total=lista.length+inss;const faltaNome=lista.filter(x=>!x.nome).length;
+  const big=(v,l,cor)=>html`<div><div class="font-display text-4xl sm:text-5xl tnum" style=${{color:cor}}>${v}</div><div class="text-muted text-xs mt-1">${l}</div></div>`;
+  const linha={borderBottom:"1px solid var(--line, rgba(255,255,255,.08))"};
+  return html`<${Card} className="md:col-span-12" title="ABS da planilha" right=${pl?html`<span class="text-[11px] text-muted">atualizada às ${new Date(pl.em).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}</span>`:null}>
+    ${pl&&pl.alerta&&html`<div class="text-[12px] mb-3 font-semibold" style=${{color:"var(--red)"}}>⚠ Planilha com problema — números congelados na última leitura boa.</div>`}
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div class="min-w-0">${big(inss,"fixo na planilha (INSS)","var(--accent)")}
+        <div class="text-[12px] text-muted mt-3">Afastados de INSS não entram como falta do dia; aparecem aqui para fechar o total.</div></div>
+      <div class="min-w-0 md:pl-6" style=${{borderLeft:"1px solid var(--line, rgba(255,255,255,.08))"}}>${big(lista.length,"ABS do dia (sem INSS)","var(--red)")}
+        <div class="text-[13px] mt-3"><b class="tnum" style=${{color:"var(--accent)"}}>${nAT} AT</b> <span class="text-muted">·</span> <b class="tnum" style=${{color:"var(--red)"}}>${nF} F</b>${inss?html` <span class="text-muted">·</span> <b class="tnum">${inss} INSS</b>`:null}${nOut?html` <span class="text-muted">· ${nOut} outro(s)</span>`:null}</div></div>
+    </div>
+    <div class="text-[13px] mt-3 font-semibold">Total geral: ${total} · ${lista.length} ABS do dia + ${inss} INSS</div>
+    ${pl&&pl.semIdentificacao>0&&html`<div class="text-[12px] mt-3 p-3 rounded-xl border border-line" style=${{color:"var(--amber)"}}>⚠ ${pl.semIdentificacao} registro(s) chegaram sem nome, CPF ou Groot ID identificável. É necessário corrigir o Apps Script da Presença KN para enviar a identificação de cada linha. O painel não inventa nomes nem remove ABS anteriores com essa resposta incompleta.</div>`}
+    ${lista.length>0&&html`<button type="button" onClick=${()=>setAberto(v=>!v)} aria-expanded=${aberto} class="mt-5 w-full flex items-center gap-2 text-left text-[12px] font-semibold uppercase tracking-[.14em] text-muted py-2" style=${{borderTop:"1px solid var(--line, rgba(255,255,255,.08))"}}>
+      <span style=${{display:"inline-block",transition:"transform .2s",transform:aberto?"rotate(90deg)":"none"}}>▶</span> Colaboradores que faltaram · ${lista.length}</button>`}
+    ${aberto&&html`<div class="grid gap-0.5 mt-1">
+      <div class="flex items-center gap-3 text-[11px] uppercase tracking-[.12em] text-muted pb-1.5" style=${linha}><span class="w-14 shrink-0">Escala</span><span class="w-20 shrink-0">Turno</span><span class="flex-1">Colaborador</span><span>Motivo</span></div>
+      ${lista.map(x=>html`<div class="flex items-center gap-3 text-[13px] py-1.5" style=${linha}>
+        <b class="tnum w-14 shrink-0">${x.esc||"—"}</b><span class="tnum text-muted w-20 shrink-0">${[x.sig,x.hora].filter(Boolean).join(" · ")}</span>
+        <span class="flex-1 min-w-0 truncate ${x.nome?"":"text-muted italic"}">${x.nome||"nome não veio da planilha"}</span>
+        ${x.cod?html`<${Pill} tom=${x.cod==="AT"?"accent":"red"}>${x.cod==="AT"?"ATESTADO":x.cod==="F"?"FALTA":x.cod}</${Pill}>`:null}</div>`)}
+      ${faltaNome>0&&html`<div class="text-[11px] text-muted mt-2">A planilha está mandando só o turno de ${faltaNome} marcação(ões) — a escala foi achada pelo turno, mas o nome precisa ser liberado no Apps Script.</div>`}
+    </div>`}
+  </${Card}>`;
+}
 /* ---- QUADRO · DIARISTAS: o que falta no HC (Delta da HC_PLAN) é coberto primeiro por diarista ---- */
 /* ============ DIARISTAS (banco do KN Diaristas Control) ============ */
 const K_DZ="escpainel:diaristas";
@@ -1265,6 +1349,12 @@ function QuadroDiaristas({calc,data,mudar,podeEditar,pode,toast,log=()=>{}}){
   const faltaTotal=linhas.reduce((s,x)=>s+Math.max(0,x.pedir-x.dx.length),0);
   return html`<${Card} className="md:col-span-12" title="Quadro · diaristas" right=${html`<span class="flex items-center gap-2"><${Pill} tom=${totVieram<totPedir?"red":"green"}>${totVieram} de ${totPedir} diarista(s)</${Pill}>${totPedir>0&&html`<${BtnMini} onClick=${copiar}>Copiar pedido</${BtnMini}>`}</span>`}>
     <div class="text-[12px] text-muted mb-3 max-w-3xl">${Object.keys(hc).length?"O que falta no quadro de cada escala (Delta HC da HC_PLAN) é pedido para diarista.":"O que falta no quadro de cada escala é pedido para diarista. Toque em Puxar da planilha para usar o Delta da HC_PLAN."} Os ABS do dia ficam para as pessoas do sistema, no cartão de cadeia logo abaixo.</div>
+    ${dz&&dz.ok&&html`<div class="flex items-end gap-8 flex-wrap mb-4">
+      <div><div class="font-display text-4xl sm:text-5xl tnum" style=${{color:"var(--accent)"}}>${dz.dia.length}</div><div class="text-muted text-xs mt-1">total de diaristas no dia</div></div>
+      <div><div class="font-display text-2xl tnum">${dz.dia.length-livres.length}</div><div class="text-muted text-xs mt-1">já numa escala</div></div>
+      <div><div class="font-display text-2xl tnum" style=${{color:livres.length?"var(--amber)":"var(--green)"}}>${livres.length}</div><div class="text-muted text-xs mt-1">livres</div></div>
+      <div><div class="font-display text-2xl tnum" style=${{color:totVieram<totPedir?"var(--red)":"var(--green)"}}>${totPedir}</div><div class="text-muted text-xs mt-1">pedidos pelo quadro</div></div>
+    </div>`}
     ${dz&&dz.ok?html`<div class="rounded-2xl border border-line p-3 mb-3" style=${{background:"var(--wash)"}}>
         <div class="flex items-center gap-2 flex-wrap mb-2"><span class="text-[11px] uppercase tracking-[.14em] text-muted font-semibold">Diaristas lançados no dia</span>
           <${Pill} tom=${livres.length?"amber":"green"}>${livres.length} livre(s) de ${dz.dia.length}</${Pill}>
@@ -1317,17 +1407,24 @@ function CoberturaView({escalas,historico,versao,regrasNuvem,podeEditar,toast,ca
       return lerDiaristas(c,data).then(r=>{if(vivo)setDz(r)}).catch(e=>{if(vivo)setDz({ok:false,erro:e.message||String(e),banco:[],dia:[]})})}).catch(()=>{});
     return()=>{vivo=false}},[data,versao]);
   calc.dz=dz;
-  const puxar=async(auto)=>{if(!podeEditar)return;setPuxando(true);
+  const puxar=async(auto)=>{if(!podeEditar)return;setPuxando(true);if(!auto){try{if(window.Notification&&Notification.permission==='default')Notification.requestPermission()}catch(_){}}
     try{const cfg=await cfgPlanilha();
       if(!cfg||!cfg.url){if(!auto)toast("Cole o link da planilha (Apps Script) em ⚙ Configurações.",true);return}
-      const r=await chamarPlanilha(cfg,data);if(!r||!r.ok)throw new Error(r&&r.erro||"A planilha não respondeu");
+      const r=await chamarPlanilha(cfg,data);if(!r||!r.ok)throw new Error(r&&r.erro||"A planilha não respondeu");r._absBruto=r.abs;
       const x=aplicarPlanilha(dia,r,escalas);mudar(d=>aplicarPlanilha(d,r,escalas).dia);
-      log({tipo:"Planilha puxada",nome:"Headcount KN 2026",detalhe:`${r.abs.length} ABS (${x.nAbs} novos) · ${x.nFolga} escala(s) de folga · quadro de ${Object.keys(x.dia.hcplan).length} escala(s)${x.naoAchados.length?" · não achados no HC: "+x.naoAchados.map(a=>a.nome).join(", "):""}`});
-      toast(`Planilha: ${r.abs.length} ABS${x.nAbs?` (${x.nAbs} novos)`:""}${x.nFolga?` · ${x.nFolga} escala(s) de folga`:""}${r.colunaDoDia?"":" · sem coluna desse dia na Presença KN"}.`)}
+      if(x.alertaNovo){log({tipo:"Planilha com problema",nome:"Headcount KN 2026",detalhe:`marcação do dia caiu de ${x.alerta.antes} para ${x.alerta.agora} — ABS congelados na última leitura boa`});
+        toast(`⚠ ATENÇÃO: a planilha parece quebrada — a marcação de hoje caiu de ${x.alerta.antes} para ${x.alerta.agora}. O painel não apagou nenhum ABS. Confira a aba Preseça KN.`,true);
+        try{if(window.Notification&&Notification.permission==="granted")new Notification("Painel KN · planilha com problema",{body:`Marcação de hoje caiu de ${x.alerta.antes} para ${x.alerta.agora}.`})}catch(_){}}
+      if(x.recuperou){log({tipo:"Planilha normalizada",nome:"Headcount KN 2026",detalhe:"marcação do dia voltou ao normal"});toast("✓ A planilha voltou ao normal — ABS atualizados.")}
+      x.removidos.forEach(m=>log({tipo:"Falta desmarcada",nome:m.nome,cpf:m.cpf,escala:(escalas.find(g=>g._id===m.gid)||{}).code||"",detalhe:"planilha: "+(m.motivo||"ABS")+" trocado por presença"+(m.trocas?" · "+m.trocas+" troca(s) desfeita(s)":"")}));
+      log({tipo:"Planilha puxada",nome:"Headcount KN 2026",detalhe:`${r.abs.length} ABS (${x.nAbs} novos) · ${x.nFolga} escala(s) de folga · quadro de ${Object.keys(x.dia.hcplan).length} escala(s)${x.naoAchados.length?" · não achados no HC: "+x.naoAchados.map(a=>a.nome).join(", "):""}${x.ignorados.length?" · fora do quadro: "+x.ignorados.map(a=>a.nome+" ("+a.motivo+")").join(", "):""}`});
+      if(!x.alerta&&!x.recuperou&&(!auto||x.nAbs||x.removidos.length||x.naoAchados.length!==((dia.planilha&&dia.planilha.naoAchados)||[]).length))toast(`Planilha: ${r.abs.length} ABS${x.nAbs?` (${x.nAbs} novos)`:""}${x.removidos.length?` · ${x.removidos.length} voltou(aram) a presença: ${x.removidos.map(m=>m.nome).join(", ")}`:""}${x.ignorados.length?` · ${x.ignorados.length} fora do quadro (veja o aviso em amarelo)`:""}${x.nFolga?` · ${x.nFolga} escala(s) de folga`:""}${r.colunaDoDia?"":" · sem coluna desse dia na Presença KN"}.`)}
     catch(e){toast("Não deu para puxar da planilha: "+(e.message||e),true)}
     finally{setPuxando(false)}};
-  useEffect(()=>{if(!ok||!podeEditar||dia.planilha||tentados.current.has(data))return;if(difDias(hojeISO(),data)>PRAZO_DIAS||difDias(data,hojeISO())>0)return;
+  useEffect(()=>{if(!ok||!podeEditar||tentados.current.has(data))return;if(dia.planilha&&dia.planilha.em&&dia.planilha.contagem!==undefined&&Date.now()-new Date(dia.planilha.em).getTime()<15*60e3)return;if(difDias(hojeISO(),data)>PRAZO_DIAS||difDias(data,hojeISO())>0)return;
     tentados.current.add(data);puxar(true)},[ok,data]);
+  const puxarRef=useRef(puxar);puxarRef.current=puxar;
+  useEffect(()=>{if(!ok||!podeEditar||data!==hojeISO())return;const t=setInterval(()=>{if(document.visibilityState==='visible'&&puxarRef.current)puxarRef.current(true)},5*60e3);return()=>clearInterval(t)},[ok,data,podeEditar]);
   const importarMeli=async porData=>{try{let tot=0;const fol=[];const ds=Object.keys(porData).sort();
     for(const d of ds){
       if(d===data){const r=mesclarPend(dia,porData[d],escalas);tot+=r.novas;fol.push(...r.folgas.map(c=>c+" em "+dm(d)));mudar(x=>mesclarPend(x,porData[d],escalas).dia)}
@@ -1354,14 +1451,16 @@ function CoberturaView({escalas,historico,versao,regrasNuvem,podeEditar,toast,ca
             ${podeEditar&&html`<${BtnMini} disabled=${puxando} onClick=${()=>puxar(false)}>${puxando?"Puxando…":"↻ Puxar da planilha"}</${BtnMini}>`}
             ${dz&&dz.ok&&html`<span class="text-[11px] text-muted">${dz.dia.length} diarista(s) lançado(s) no dia</span>`}
             ${dia.planilha&&html`<span class="text-[11px] text-muted">planilha puxada às ${new Date(dia.planilha.em).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})} · ${dia.planilha.abs} ABS${dia.planilha.colunaDoDia?"":" (sem coluna do dia na Presença KN)"}</span>`}</div>
-          ${dia.planilha&&dia.planilha.naoAchados&&dia.planilha.naoAchados.length>0&&html`<div class="text-[12px] mt-2" style=${{color:"var(--amber)"}}>ABS da planilha que não estão no HC do painel: ${dia.planilha.naoAchados.map(a=>a.nome+(a.antiga?" ("+a.antiga+")":"")).join(", ")}</div>`}
+          <${AlertaPlanilha} pl=${dia.planilha}/>
+          ${dia.planilha&&dia.planilha.ignorados&&dia.planilha.ignorados.length>0&&html`<div class="text-[12px] mt-1" style=${{color:"var(--amber)"}}>ABS da planilha que ficaram fora da lista: ${dia.planilha.ignorados.map(a=>a.nome+" — "+a.motivo).join("; ")}</div>`}
         </div>
         <label class="text-[11px] text-muted grid gap-1">Dia<input id="cob-data" type="date" value=${data} onChange=${e=>trocarData(e.target.value)} class=${campo+" !w-auto tnum"}/></label>
       </div>
       <div class="grid grid-cols-3 sm:grid-cols-6 gap-4 mt-6">
-        ${stat(vagasFixas,"a menos (fixo)",vagasFixas?"red":null)}${stat(abs,"ABS do dia",abs?"red":null)}${stat(calc.trocas.length,"trocas","accent")}${stat(calc.abertos,"furos abertos",calc.abertos?"red":"green")}${stat(calc.pend+calc.pendMeli,"p/ atribuir",calc.pend+calc.pendMeli?"amber":null)}${stat(pulmao.length,"livres no pulmão","amber")}
+        ${stat(vagasFixas,"a menos (fixo)",vagasFixas?"red":null)}${(()=>{const t=abs+(((dia.planilha&&dia.planilha.naoAchados)||[]).length);return stat(t,"ABS do dia",t?"red":null)})()}${stat(calc.trocas.length,"trocas","accent")}${stat(calc.abertos,"furos abertos",calc.abertos?"red":"green")}${stat(calc.pend+calc.pendMeli,"p/ atribuir",calc.pend+calc.pendMeli?"amber":null)}${stat(pulmao.length,"livres no pulmão","amber")}
       </div>
     </${Card}>
+    <${AbsPlanilha} nos=${nos} dia=${dia}/>
     <${QuadroDiaristas} calc=${calc} data=${data} mudar=${mudar} podeEditar=${podeEditar} pode=${pode} toast=${toast} log=${log}/>
     <${CadeiaABS} calc=${calc} data=${data} mudar=${mudar} podeEditar=${podeEditar} pode=${pode} toast=${toast} log=${log}/>
     <${PendenciasMeli} calc=${calc} data=${data} mudar=${mudar} escalas=${escalas} pode=${pode} podeEditar=${podeEditar} toast=${toast} log=${log} onImportar=${importarMeli}/>
