@@ -234,7 +234,7 @@ const BtnSec=({onClick,children,disabled})=>html`<button type="button" disabled=
 const campo="w-full bg-[var(--wash)] border border-line rounded-2xl px-3.5 py-2.5 text-[14px] outline-none focus:border-[var(--accent)] transition-colors placeholder:text-[var(--ph)]";
 
 function Nav({view,setView,status,onSync,onCfg,tema,setTema}){
-  const tabs=[["escalas","Escalas"],["antigas",html`<span class="sm:hidden">Antigas</span><span class="hidden sm:inline">Escalas antigas</span>`],["cobertura","Cobertura"],["grupos","GRUPOS"],["historico","Histórico"]];
+  const tabs=[["escalas","Escalas"],["antigas",html`<span class="sm:hidden">Antigas</span><span class="hidden sm:inline">Escalas antigas</span>`],["cobertura","Cobertura"],["historico","Histórico"]];
   const st=status.ok===null?{c:"#64748b",t:"conectando…"}:!status.ok?{c:"#dc2626",t:"sem nuvem"}:status.busy?{c:"#d97706",t:"salvando…"}:{c:"#16a34a",t:"ao vivo · "+status.at};
   return html`<header class="fixed top-0 inset-x-0 z-50" style=${{paddingTop:"env(safe-area-inset-top,0px)"}}>
     <div class="glass !border-x-0 !border-t-0" style=${{background:"var(--navbg)"}}>
@@ -1589,88 +1589,6 @@ function Config({onClose,escalas,historico,onImportado,toast}){
   </${motion.div}>`;
 }
 
-/* Consulta isolada à cópia GRUPOS: não grava nem modifica escalas/ABS/histórico. */
-function GruposView({escalas}){
-  const EMAIL_GRUPOS="kuehne2027@gmail.com";
-  const [linhas,setLinhas]=useState([]),[busy,setBusy]=useState(false),[erro,setErro]=useState(""),[q,setQ]=useState("");
-  const [sessao,setSessao]=useState(null),[authBusy,setAuthBusy]=useState(true),[authMsg,setAuthMsg]=useState("");
-  const [codigo,setCodigo]=useState(""),[codigoEnviado,setCodigoEnviado]=useState(false);
-  const [limiteEmail,setLimiteEmail]=useState(false);
-  useEffect(()=>{
-    let ativo=true,sub=null;
-    (async()=>{try{
-      const c=await nuvem();const {data}=await c.auth.getSession();if(ativo)setSessao(data?.session||null);
-      const {data:listener}=c.auth.onAuthStateChange((_event,session)=>{if(ativo){setSessao(session);setErro("");}});
-      sub=listener?.subscription;
-    }catch(e){if(ativo)setErro("Não foi possível iniciar o acesso protegido: "+(e.message||e))}
-    finally{if(ativo)setAuthBusy(false)}})();
-    return()=>{ativo=false;sub?.unsubscribe?.()};
-  },[]);
-  const autorizado=!!(sessao?.user?.email?.toLowerCase()===EMAIL_GRUPOS && sessao?.access_token);
-  const enviarCodigo=async()=>{
-    setAuthBusy(true);setErro("");setAuthMsg("");
-    try{const c=await nuvem();const {error}=await c.auth.signInWithOtp({email:EMAIL_GRUPOS,options:{shouldCreateUser:true,emailRedirectTo:"https://kuehne2027.github.io/Atribuicao/"}});
-      if(error)throw error;setCodigoEnviado(true);setAuthMsg("Enviamos um código ou link para "+EMAIL_GRUPOS+". Confira também o spam.");
-    }catch(e){const msg=String(e.message||e);if(/rate limit|too many requests|429/i.test(msg)){setLimiteEmail(true);setErro("O Supabase atingiu o limite de e-mails. Não é necessário tentar novamente agora. O acesso voltará a funcionar quando o limite for liberado; suas escalas e histórico continuam disponíveis.")}else setErro("Falha ao enviar o acesso: "+msg)}finally{setAuthBusy(false)}
-  };
-  const confirmarCodigo=async()=>{
-    setAuthBusy(true);setErro("");
-    try{const c=await nuvem();const {data,error}=await c.auth.verifyOtp({email:EMAIL_GRUPOS,token:codigo.trim(),type:"email"});
-      if(error)throw error;setSessao(data.session);setAuthMsg("Acesso autorizado.");
-    }catch(e){setErro("Código inválido ou expirado: "+(e.message||e))}finally{setAuthBusy(false)}
-  };
-  const sairGrupos=async()=>{try{const c=await nuvem();await c.auth.signOut()}catch(e){}setSessao(null);setLinhas([]);setCodigo("");setCodigoEnviado(false);setAuthMsg("")};
-  const carregar=useCallback(async()=>{
-    if(!autorizado)return;
-    setBusy(true);setErro("");
-    try{
-      const c=await nuvem();
-      const {data,error}=await c.functions.invoke("kn-grupos-protegido",{method:"GET",headers:{Authorization:"Bearer "+sessao.access_token}});
-      if(error){let detalhe="";try{detalhe=(await error.context?.json?.())?.error||""}catch(e){}throw new Error(detalhe||error.message||"Falha na função protegida")}
-      if(!Array.isArray(data?.data))throw new Error(data?.error||"Resposta inesperada da função protegida");
-      setLinhas(data.data);
-    }catch(e){setErro(e.message||String(e));setLinhas([])}finally{setBusy(false)}
-  },[autorizado,sessao?.access_token]);
-  useEffect(()=>{if(autorizado)carregar();else setLinhas([])},[autorizado,carregar]);
-  if(!autorizado)return html`<div class="grid gap-4"><${Card} title="Acesso protegido · GRUPOS">
-    <h1 class="font-display text-2xl sm:text-3xl">Conferência GRUPOS</h1>
-    <p class="text-[13px] text-muted mt-3">Para consultar os colaboradores, confirme o acesso pelo e-mail autorizado. As demais abas do painel continuam disponíveis.</p>
-    <p class="text-[13px] mt-4">E-mail autorizado: <b>${EMAIL_GRUPOS}</b></p>
-    ${sessao&&!autorizado&&html`<div class="text-[13px] mt-3" role="alert">Esta sessão não está autorizada para a aba GRUPOS. <button type="button" class="underline" onClick=${sairGrupos}>Sair desta conta</button></div>`}
-    <div class="flex flex-wrap gap-3 mt-4">
-      <${BtnSec} disabled=${authBusy||limiteEmail} onClick=${enviarCodigo}>${authBusy?"Aguarde…":limiteEmail?"Envio temporariamente indisponível":codigoEnviado?"Reenviar código":"Enviar código por e-mail"}</${BtnSec}>
-    </div>
-    ${codigoEnviado&&html`<div class="mt-4 grid gap-2 max-w-sm"><label class="text-[13px]" for="kn-grupos-otp">Código recebido no e-mail</label><input id="kn-grupos-otp" class=${campo} value=${codigo} onInput=${e=>setCodigo(e.target.value)} inputMode="numeric" autoComplete="one-time-code" placeholder="Digite o código recebido"/><${BtnSec} disabled=${authBusy||!codigo.trim()} onClick=${confirmarCodigo}>Confirmar acesso</${BtnSec}></div>`}
-    ${authMsg&&html`<p class="text-[13px] mt-3" role="status">${authMsg}</p>`}
-    ${erro&&html`<p class="text-[13px] mt-3" style=${{color:"var(--red)"}} role="alert">${erro}</p>`}
-  </${Card}></div>`;
-  const nomes=new Map();escalas.forEach(g=>(g.pessoas||[]).forEach(p=>{
-    const n=norm(String(p.nome||"").trim());if(n){const a=nomes.get(n)||[];a.push(g.code);nomes.set(n,a)}
-  }));
-  const comparados=linhas.map(r=>{const a=nomes.get(norm(String(r.nome||"").trim()))||[];return {...r,_painel:a}});
-  const iguais=comparados.filter(r=>r._painel.length===1).length;
-  const pendentes=comparados.filter(r=>r._painel.length!==1);
-  const termo=norm(q.trim()),dig=soDig(q);
-  const vis=comparados.filter(r=>!termo||norm([r.nome,r.groot_id,r.matricula,r.coordenador,r.escala,r.escala_antiga,r.horario,r._painel.join(" ")].join(" ")).includes(termo)||(dig.length>=3&&soDig(String(r.groot_id||"")).includes(dig)));
-  const texto=(r,...ks)=>{for(const k of ks){if(r[k]!==undefined&&r[k]!==null&&String(r[k]).trim())return String(r[k])}return "—"};
-  return html`<div class="grid gap-4">
-    <${Card} title="Headcount KN 2026 · GRUPOS sincronizado">
-      <div class="flex items-center justify-between flex-wrap gap-3">
-        <div><h1 class="font-display text-2xl sm:text-3xl">Conferência GRUPOS</h1><p class="text-[13px] text-muted mt-2">Dados copiados da planilha para a tabela isolada do Supabase. Consulta somente leitura; não altera escalas, ABS, cobertura ou histórico.</p></div>
-        <div class="flex flex-wrap gap-2"><${BtnSec} disabled=${busy} onClick=${carregar}>${busy?"Consultando…":"↻ Atualizar agora"}</${BtnSec}><${BtnSec} onClick=${sairGrupos}>Sair de GRUPOS</${BtnSec}></div>
-      </div>
-      ${erro&&html`<div role="alert" class="text-[13px] mt-4" style=${{color:"var(--red)"}}>Não foi possível consultar GRUPOS: ${erro}. Verifique a função protegida e a autenticação no Supabase.</div>`}
-      ${!busy&&!erro&&html`<div class="flex flex-wrap gap-4 mt-5 text-[13px]"><span><b>${linhas.length}</b> registros recebidos</span><span><b>${iguais}</b> nomes únicos encontrados no painel</span><span><b>${pendentes.length}</b> sem correspondência única</span></div>`}
-      <p class="text-[12px] text-muted mt-3">A conferência por nome é apenas indicativa: pessoas com nomes iguais ou diferentes entre as bases exigem verificação pelo Groot ID antes de qualquer atualização de escala.</p>
-    </${Card}>
-    <${Card} title="Consultar colaboradores">
-      <input type="search" class=${campo} value=${q} onInput=${e=>setQ(e.target.value)} placeholder="Buscar nome, Groot ID, matrícula, coordenador ou escala" aria-label="Buscar GRUPOS"/>
-      <div class="text-[12px] text-muted mt-2">${vis.length} registro(s) exibido(s)</div>
-      <div class="overflow-x-auto mt-3 rounded-2xl border border-line"><table class="w-full text-left text-[12px] min-w-[850px]"><thead style=${{background:"var(--wash)"}}><tr>${["Groot ID","Nome","Matrícula","Coordenador","Escala GRUPOS","Horário","No painel"].map(h=>html`<th class="px-3 py-3 font-semibold">${h}</th>`)}</tr></thead><tbody>${vis.map((r,i)=>html`<tr key=${r.id||i} class="border-t border-[var(--sep)]"><td class="px-3 py-2 font-mono">${texto(r,"groot_id")}</td><td class="px-3 py-2 font-medium">${texto(r,"nome")}</td><td class="px-3 py-2">${texto(r,"matricula")}</td><td class="px-3 py-2">${texto(r,"coordenador")}</td><td class="px-3 py-2">${texto(r,"escala","escala_atual","escala_descricao")}</td><td class="px-3 py-2">${texto(r,"horario")}</td><td class="px-3 py-2"><${Pill} tom=${r._painel.length===1?"green":"amber"}>${r._painel.length===1?r._painel[0]:r._painel.length>1?"Nome duplicado":"Conferir"}</${Pill}></td></tr>`)}</tbody></table></div>
-    </${Card}>
-  </div>`;
-}
-
 function App(){
   const [view,setViewRaw]=useState(()=>{try{return localStorage.getItem("kn-painel-view")||"escalas"}catch(e){return "escalas"}});
   const setView=v=>{setViewRaw(v);try{localStorage.setItem("kn-painel-view",v)}catch(e){}window.scrollTo({top:0})};
@@ -1743,8 +1661,7 @@ function App(){
     <main class="max-w-7xl mx-auto px-4 pt-24 pb-16">
       ${status.ok===false&&!carregando&&html`<div class="rounded-2xl px-4 py-3 text-sm mb-4" style=${{background:"color-mix(in srgb,var(--red) 10%,transparent)",color:"var(--red)"}}>Sem conexão com a nuvem. Confira a internet ou a conexão em ⚙ Configurações. As escalas voltam a aparecer quando a conexão voltar.</div>`}
       <${AnimatePresence} mode="wait">
-        ${view==="grupos"?html`<${GruposView} key="g" escalas=${escalas}/>`
-        :view==="historico"?html`<${HistoricoView} key="h" historico=${historico} escalas=${escalas} podeEditar=${podeEditar} ops=${ops}/>`
+        ${view==="historico"?html`<${HistoricoView} key="h" historico=${historico} escalas=${escalas} podeEditar=${podeEditar} ops=${ops}/>`
           :view==="cobertura"?html`<${CoberturaView} key="c" escalas=${escalas} historico=${historico} versao=${versao} regrasNuvem=${dados.regras} podeEditar=${podeEditar} toast=${toast} carregando=${carregando}/>`
           :view==="antigas"?html`<${AntigasView} key="a" escalas=${escalas} carregando=${carregando} ordem=${dados.ordemHorarios} onSalvarOrdem=${cols=>gravar(()=>salvarOrdemHorarios(cols),"Ordem dos horários salva para todos.")} irPara=${id=>{setFoco({id,t:Date.now()});setViewRaw("escalas");try{localStorage.setItem("kn-painel-view","escalas")}catch(e){}}}/>`
           :html`<${EscalasView} key="e" escalas=${escalas} podeEditar=${podeEditar} ops=${ops} carregando=${carregando} foco=${foco} onCfg=${()=>setCfgOpen(true)}/>`}
