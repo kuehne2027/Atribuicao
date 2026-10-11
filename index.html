@@ -1608,7 +1608,7 @@ function GruposView({escalas}){
   const autorizado=!!(sessao?.user?.email?.toLowerCase()===EMAIL_GRUPOS && sessao?.access_token);
   const enviarCodigo=async()=>{
     setAuthBusy(true);setErro("");setAuthMsg("");
-    try{const c=await nuvem();const {error}=await c.auth.signInWithOtp({email:EMAIL_GRUPOS,options:{shouldCreateUser:true}});
+    try{const c=await nuvem();const {error}=await c.auth.signInWithOtp({email:EMAIL_GRUPOS,options:{shouldCreateUser:true,emailRedirectTo:"https://kuehne2027.github.io/Atribuicao/"}});
       if(error)throw error;setCodigoEnviado(true);setAuthMsg("Enviamos um código ou link para "+EMAIL_GRUPOS+". Confira também o spam.");
     }catch(e){setErro("Falha ao enviar o acesso: "+(e.message||e))}finally{setAuthBusy(false)}
   };
