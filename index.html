@@ -1591,20 +1591,58 @@ function Config({onClose,escalas,historico,onImportado,toast}){
 
 /* Consulta isolada à cópia GRUPOS: não grava nem modifica escalas/ABS/histórico. */
 function GruposView({escalas}){
-  const [linhas,setLinhas]=useState([]),[busy,setBusy]=useState(true),[erro,setErro]=useState(""),[q,setQ]=useState("");
+  const EMAIL_GRUPOS="kuehne2027@gmail.com";
+  const [linhas,setLinhas]=useState([]),[busy,setBusy]=useState(false),[erro,setErro]=useState(""),[q,setQ]=useState("");
+  const [sessao,setSessao]=useState(null),[authBusy,setAuthBusy]=useState(true),[authMsg,setAuthMsg]=useState("");
+  const [codigo,setCodigo]=useState(""),[codigoEnviado,setCodigoEnviado]=useState(false);
+  useEffect(()=>{
+    let ativo=true,sub=null;
+    (async()=>{try{
+      const c=await nuvem();const {data}=await c.auth.getSession();if(ativo)setSessao(data?.session||null);
+      const {data:listener}=c.auth.onAuthStateChange((_event,session)=>{if(ativo){setSessao(session);setErro("");}});
+      sub=listener?.subscription;
+    }catch(e){if(ativo)setErro("Não foi possível iniciar o acesso protegido: "+(e.message||e))}
+    finally{if(ativo)setAuthBusy(false)}})();
+    return()=>{ativo=false;sub?.unsubscribe?.()};
+  },[]);
+  const autorizado=!!(sessao?.user?.email?.toLowerCase()===EMAIL_GRUPOS && sessao?.access_token);
+  const enviarCodigo=async()=>{
+    setAuthBusy(true);setErro("");setAuthMsg("");
+    try{const c=await nuvem();const {error}=await c.auth.signInWithOtp({email:EMAIL_GRUPOS,options:{shouldCreateUser:true}});
+      if(error)throw error;setCodigoEnviado(true);setAuthMsg("Enviamos um código ou link para "+EMAIL_GRUPOS+". Confira também o spam.");
+    }catch(e){setErro("Falha ao enviar o acesso: "+(e.message||e))}finally{setAuthBusy(false)}
+  };
+  const confirmarCodigo=async()=>{
+    setAuthBusy(true);setErro("");
+    try{const c=await nuvem();const {data,error}=await c.auth.verifyOtp({email:EMAIL_GRUPOS,token:codigo.trim(),type:"email"});
+      if(error)throw error;setSessao(data.session);setAuthMsg("Acesso autorizado.");
+    }catch(e){setErro("Código inválido ou expirado: "+(e.message||e))}finally{setAuthBusy(false)}
+  };
+  const sairGrupos=async()=>{try{const c=await nuvem();await c.auth.signOut()}catch(e){}setSessao(null);setLinhas([]);setCodigo("");setCodigoEnviado(false);setAuthMsg("")};
   const carregar=useCallback(async()=>{
+    if(!autorizado)return;
     setBusy(true);setErro("");
     try{
-      const c=await nuvem(),todos=[];
-      for(let inicio=0;inicio<10000;inicio+=500){
-        const {data,error}=await c.from("kn_grupos_sync").select("*").order("id",{ascending:true}).range(inicio,inicio+499);
-        if(error)throw error;
-        todos.push(...(data||[]));if(!data||data.length<500)break;
-      }
-      setLinhas(todos);
-    }catch(e){setErro(e.message||String(e))}finally{setBusy(false)}
-  },[]);
-  useEffect(()=>{carregar()},[carregar]);
+      const c=await nuvem();
+      const {data,error}=await c.functions.invoke("kn-grupos-protegido",{method:"GET",headers:{Authorization:"Bearer "+sessao.access_token}});
+      if(error){let detalhe="";try{detalhe=(await error.context?.json?.())?.error||""}catch(e){}throw new Error(detalhe||error.message||"Falha na função protegida")}
+      if(!Array.isArray(data?.data))throw new Error(data?.error||"Resposta inesperada da função protegida");
+      setLinhas(data.data);
+    }catch(e){setErro(e.message||String(e));setLinhas([])}finally{setBusy(false)}
+  },[autorizado,sessao?.access_token]);
+  useEffect(()=>{if(autorizado)carregar();else setLinhas([])},[autorizado,carregar]);
+  if(!autorizado)return html`<div class="grid gap-4"><${Card} title="Acesso protegido · GRUPOS">
+    <h1 class="font-display text-2xl sm:text-3xl">Conferência GRUPOS</h1>
+    <p class="text-[13px] text-muted mt-3">Para consultar os colaboradores, confirme o acesso pelo e-mail autorizado. As demais abas do painel continuam disponíveis.</p>
+    <p class="text-[13px] mt-4">E-mail autorizado: <b>${EMAIL_GRUPOS}</b></p>
+    ${sessao&&!autorizado&&html`<div class="text-[13px] mt-3" role="alert">Esta sessão não está autorizada para a aba GRUPOS. <button type="button" class="underline" onClick=${sairGrupos}>Sair desta conta</button></div>`}
+    <div class="flex flex-wrap gap-3 mt-4">
+      <${BtnSec} disabled=${authBusy} onClick=${enviarCodigo}>${authBusy?"Aguarde…":codigoEnviado?"Reenviar código":"Enviar código por e-mail"}</${BtnSec}>
+    </div>
+    ${codigoEnviado&&html`<div class="mt-4 grid gap-2 max-w-sm"><label class="text-[13px]" for="kn-grupos-otp">Código recebido no e-mail</label><input id="kn-grupos-otp" class=${campo} value=${codigo} onInput=${e=>setCodigo(e.target.value)} inputMode="numeric" autoComplete="one-time-code" placeholder="Digite o código recebido"/><${BtnSec} disabled=${authBusy||!codigo.trim()} onClick=${confirmarCodigo}>Confirmar acesso</${BtnSec}></div>`}
+    ${authMsg&&html`<p class="text-[13px] mt-3" role="status">${authMsg}</p>`}
+    ${erro&&html`<p class="text-[13px] mt-3" style=${{color:"var(--red)"}} role="alert">${erro}</p>`}
+  </${Card}></div>`;
   const nomes=new Map();escalas.forEach(g=>(g.pessoas||[]).forEach(p=>{
     const n=norm(String(p.nome||"").trim());if(n){const a=nomes.get(n)||[];a.push(g.code);nomes.set(n,a)}
   }));
@@ -1618,9 +1656,9 @@ function GruposView({escalas}){
     <${Card} title="Headcount KN 2026 · GRUPOS sincronizado">
       <div class="flex items-center justify-between flex-wrap gap-3">
         <div><h1 class="font-display text-2xl sm:text-3xl">Conferência GRUPOS</h1><p class="text-[13px] text-muted mt-2">Dados copiados da planilha para a tabela isolada do Supabase. Consulta somente leitura; não altera escalas, ABS, cobertura ou histórico.</p></div>
-        <${BtnSec} disabled=${busy} onClick=${carregar}>${busy?"Consultando…":"↻ Atualizar agora"}</${BtnSec}>
+        <div class="flex flex-wrap gap-2"><${BtnSec} disabled=${busy} onClick=${carregar}>${busy?"Consultando…":"↻ Atualizar agora"}</${BtnSec}><${BtnSec} onClick=${sairGrupos}>Sair de GRUPOS</${BtnSec}></div>
       </div>
-      ${erro&&html`<div role="alert" class="text-[13px] mt-4" style=${{color:"var(--red)"}}>Não foi possível consultar GRUPOS: ${erro}. Confira a permissão SELECT da tabela kn_grupos_sync para a chave pública, sem publicar a chave secreta.</div>`}
+      ${erro&&html`<div role="alert" class="text-[13px] mt-4" style=${{color:"var(--red)"}}>Não foi possível consultar GRUPOS: ${erro}. Verifique a função protegida e a autenticação no Supabase.</div>`}
       ${!busy&&!erro&&html`<div class="flex flex-wrap gap-4 mt-5 text-[13px]"><span><b>${linhas.length}</b> registros recebidos</span><span><b>${iguais}</b> nomes únicos encontrados no painel</span><span><b>${pendentes.length}</b> sem correspondência única</span></div>`}
       <p class="text-[12px] text-muted mt-3">A conferência por nome é apenas indicativa: pessoas com nomes iguais ou diferentes entre as bases exigem verificação pelo Groot ID antes de qualquer atualização de escala.</p>
     </${Card}>
