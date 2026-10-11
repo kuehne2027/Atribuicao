@@ -1595,6 +1595,7 @@ function GruposView({escalas}){
   const [linhas,setLinhas]=useState([]),[busy,setBusy]=useState(false),[erro,setErro]=useState(""),[q,setQ]=useState("");
   const [sessao,setSessao]=useState(null),[authBusy,setAuthBusy]=useState(true),[authMsg,setAuthMsg]=useState("");
   const [codigo,setCodigo]=useState(""),[codigoEnviado,setCodigoEnviado]=useState(false);
+  const [limiteEmail,setLimiteEmail]=useState(false);
   useEffect(()=>{
     let ativo=true,sub=null;
     (async()=>{try{
@@ -1610,7 +1611,7 @@ function GruposView({escalas}){
     setAuthBusy(true);setErro("");setAuthMsg("");
     try{const c=await nuvem();const {error}=await c.auth.signInWithOtp({email:EMAIL_GRUPOS,options:{shouldCreateUser:true,emailRedirectTo:"https://kuehne2027.github.io/Atribuicao/"}});
       if(error)throw error;setCodigoEnviado(true);setAuthMsg("Enviamos um código ou link para "+EMAIL_GRUPOS+". Confira também o spam.");
-    }catch(e){setErro("Falha ao enviar o acesso: "+(e.message||e))}finally{setAuthBusy(false)}
+    }catch(e){const msg=String(e.message||e);if(/rate limit|too many requests|429/i.test(msg)){setLimiteEmail(true);setErro("O Supabase atingiu o limite de e-mails. Não é necessário tentar novamente agora. O acesso voltará a funcionar quando o limite for liberado; suas escalas e histórico continuam disponíveis.")}else setErro("Falha ao enviar o acesso: "+msg)}finally{setAuthBusy(false)}
   };
   const confirmarCodigo=async()=>{
     setAuthBusy(true);setErro("");
@@ -1637,7 +1638,7 @@ function GruposView({escalas}){
     <p class="text-[13px] mt-4">E-mail autorizado: <b>${EMAIL_GRUPOS}</b></p>
     ${sessao&&!autorizado&&html`<div class="text-[13px] mt-3" role="alert">Esta sessão não está autorizada para a aba GRUPOS. <button type="button" class="underline" onClick=${sairGrupos}>Sair desta conta</button></div>`}
     <div class="flex flex-wrap gap-3 mt-4">
-      <${BtnSec} disabled=${authBusy} onClick=${enviarCodigo}>${authBusy?"Aguarde…":codigoEnviado?"Reenviar código":"Enviar código por e-mail"}</${BtnSec}>
+      <${BtnSec} disabled=${authBusy||limiteEmail} onClick=${enviarCodigo}>${authBusy?"Aguarde…":limiteEmail?"Envio temporariamente indisponível":codigoEnviado?"Reenviar código":"Enviar código por e-mail"}</${BtnSec}>
     </div>
     ${codigoEnviado&&html`<div class="mt-4 grid gap-2 max-w-sm"><label class="text-[13px]" for="kn-grupos-otp">Código recebido no e-mail</label><input id="kn-grupos-otp" class=${campo} value=${codigo} onInput=${e=>setCodigo(e.target.value)} inputMode="numeric" autoComplete="one-time-code" placeholder="Digite o código recebido"/><${BtnSec} disabled=${authBusy||!codigo.trim()} onClick=${confirmarCodigo}>Confirmar acesso</${BtnSec}></div>`}
     ${authMsg&&html`<p class="text-[13px] mt-3" role="status">${authMsg}</p>`}
