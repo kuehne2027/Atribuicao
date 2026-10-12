@@ -234,7 +234,7 @@ const BtnSec=({onClick,children,disabled})=>html`<button type="button" disabled=
 const campo="w-full bg-[var(--wash)] border border-line rounded-2xl px-3.5 py-2.5 text-[14px] outline-none focus:border-[var(--accent)] transition-colors placeholder:text-[var(--ph)]";
 
 function Nav({view,setView,status,onSync,onCfg,tema,setTema}){
-  const tabs=[["escalas","Escalas"],["antigas",html`<span class="sm:hidden">Antigas</span><span class="hidden sm:inline">Escalas antigas</span>`],["cobertura","Cobertura"],["historico","Histórico"]];
+  const tabs=[["escalas","Escalas"],["antigas",html`<span class="sm:hidden">Antigas</span><span class="hidden sm:inline">Escalas antigas</span>`],["cobertura","Cobertura"],["historico","Histórico"],["grupos","GRUPOS"]];
   const st=status.ok===null?{c:"#64748b",t:"conectando…"}:!status.ok?{c:"#dc2626",t:"sem nuvem"}:status.busy?{c:"#d97706",t:"salvando…"}:{c:"#16a34a",t:"ao vivo · "+status.at};
   return html`<header class="fixed top-0 inset-x-0 z-50" style=${{paddingTop:"env(safe-area-inset-top,0px)"}}>
     <div class="glass !border-x-0 !border-t-0" style=${{background:"var(--navbg)"}}>
@@ -1589,6 +1589,66 @@ function Config({onClose,escalas,historico,onImportado,toast}){
   </${motion.div}>`;
 }
 
+
+/* ============ GRUPOS OFICIAL · CONSULTA PROTEGIDA E SOMENTE LEITURA ============ */
+const KN_GRUPOS_TABELA="kn_grupos_sync";
+async function lerGruposOficiais(){
+  const c=await nuvem(),todos=[];
+  for(let inicio=0;inicio<10000;inicio+=500){
+    const {data,error}=await c.from(KN_GRUPOS_TABELA)
+      .select("groot_id,nome,matricula,coordenador,escala_descricao,escala,turma,escala_antiga,horario")
+      .order("groot_id",{ascending:true}).range(inicio,inicio+499);
+    if(error)throw new Error(error.message||"Consulta à base GRUPOS não autorizada");
+    todos.push(...(data||[]));if(!data||data.length<500)break;
+  }
+  return todos;
+}
+function GruposAcesso({onEntrar}){
+  const [estado,setEstado]=useState(""),[erro,setErro]=useState("");
+  const entrar=async()=>{setEstado("enviando");setErro("");try{
+    const c=await nuvem();const {error}=await c.auth.signInWithOtp({email:"kuehne2027@gmail.com",options:{emailRedirectTo:location.origin+location.pathname,shouldCreateUser:false}});
+    if(error)throw error;setEstado("enviado");
+  }catch(e){setErro(e.message||String(e));setEstado("")}};
+  return html`<${Card} title="Acesso privado · GRUPOS">
+    <h2 class="font-display text-xl">Entrar sem senha</h2>
+    <p class="text-sm text-muted mt-2">A consulta oficial é exclusiva da conta autorizada. Receba um link de acesso no e-mail cadastrado.</p>
+    <div class="mt-4"><${BtnPrim} onClick=${entrar} disabled=${estado==="enviando"||estado==="enviado"}>${estado==="enviando"?"Enviando…":estado==="enviado"?"Confira seu Gmail":"Enviar link de acesso"}</${BtnPrim}></div>
+    ${estado==="enviado"&&html`<p class="text-sm mt-3" style=${{color:"var(--green)"}}>Confira a caixa de entrada e abra o link no mesmo navegador.</p>`}
+    ${erro&&html`<p role="alert" class="text-sm mt-3" style=${{color:"var(--red)"}}>${erro}</p>`}
+    <p class="text-xs text-muted mt-4">Se o envio estiver indisponível por limite do Supabase, tente novamente somente após regularizar o serviço. Nenhuma chave secreta é usada neste aplicativo.</p>
+  </${Card}>`;
+}
+function GruposView(){
+  const [dados,setDados]=useState([]),[estado,setEstado]=useState("carregando"),[erro,setErro]=useState("");
+  const [filtro,setFiltro]=useState("");const [at,setAt]=useState("");
+  const [sessao,setSessao]=useState(null),[verificando,setVerificando]=useState(true);
+  useEffect(()=>{let vivo=true,sub; (async()=>{try{const c=await nuvem();const r=await c.auth.getSession();if(vivo)setSessao(r.data.session);const l=c.auth.onAuthStateChange((_event,s)=>{if(vivo)setSessao(s)});sub=l.data.subscription}catch(e){if(vivo)setErro(String(e))}finally{if(vivo)setVerificando(false)}})();return()=>{vivo=false;sub?.unsubscribe()}},[]);
+  const carregar=useCallback(async()=>{setEstado("carregando");setErro("");try{
+    const lista=await lerGruposOficiais();setDados(lista);setAt(new Date().toLocaleString("pt-BR"));setEstado("ok");
+  }catch(e){setEstado("erro");setErro(e.message||String(e))}},[]);
+  useEffect(()=>{if(!sessao)return;carregar();const iv=setInterval(()=>{if(document.visibilityState==="visible")carregar()},5*60*1000);return()=>clearInterval(iv)},[carregar,sessao]);
+  const q=norm(filtro.trim());const vis=useMemo(()=>dados.filter(p=>!q||norm([p.nome,p.groot_id,p.escala_descricao,p.escala,p.coordenador,p.horario].join(" ")).includes(q)),[dados,q]);
+  if(verificando)return html`<${Card}>Verificando acesso…</${Card}>`;
+  if(!sessao)return html`<${GruposAcesso}/>`;
+  return html`<div class="grid gap-4">
+    <${Card} title="Cadastro oficial · GRUPOS" right=${html`<${BtnMini} onClick=${carregar} disabled=${estado==="carregando"}>↻ Atualizar</${BtnMini}>`}>
+      <div class="flex justify-between gap-2 flex-wrap"><h1 class="font-display text-xl sm:text-2xl">Colaboradores da planilha original</h1><${BtnMini} onClick=${async()=>{const c=await nuvem();await c.auth.signOut();setDados([]);setEstado("carregando")}}>Sair da conta</${BtnMini}></div>
+      <p class="text-sm text-muted mt-2">Consulta somente leitura da tabela kn_grupos_sync. Atualizada pelo Apps Script aproximadamente a cada hora. Alterações aqui não movimentam escalas, ABS ou coberturas.</p>
+      ${estado==="erro"&&html`<div role="alert" class="mt-4 rounded-xl border p-3 text-sm" style=${{color:"var(--red)",borderColor:"var(--red)"}}>Acesso à base GRUPOS indisponível: ${erro}. Verifique as permissões da tabela no Supabase. Não coloque a chave secreta no HTML.</div>`}
+      <div class="flex flex-wrap items-center gap-3 mt-4 text-sm"><${Pill} tom=${estado==="erro"?"red":estado==="carregando"?"amber":"green"}>${estado==="erro"?"Sem acesso":estado==="carregando"?"Consultando…":"Conectado"}</${Pill}>
+        <span>${dados.length} registros carregados</span><span class="text-muted">${at?"Última consulta: "+at:""}</span></div>
+      <input type="search" class=${campo+" mt-4"} placeholder="Buscar nome, Groot ID, escala, coordenador ou horário" value=${filtro} onInput=${e=>setFiltro(e.target.value)}/>
+    </${Card}>
+    <${Card} title=${"Resultado · "+vis.length+" colaboradores"}>
+      <div class="overflow-x-auto"><table class="w-full text-left text-[12px] sm:text-[13px] min-w-[780px]">
+        <thead><tr class="text-muted border-b border-line">${["Groot ID","Nome","Coordenador","Escala oficial","Escala antiga","Horário"].map(t=>html`<th class="px-2 py-3 font-semibold">${t}</th>`)}</tr></thead>
+        <tbody>${vis.slice(0,600).map(p=>html`<tr key=${p.groot_id} class="border-b border-[var(--sep)]"><td class="px-2 py-2 font-mono">${p.groot_id}</td><td class="px-2 py-2 font-medium">${p.nome}</td><td class="px-2 py-2">${p.coordenador||"—"}</td><td class="px-2 py-2" title=${p.escala_descricao||""}>${p.escala_descricao||p.escala||"—"}</td><td class="px-2 py-2">${p.escala_antiga||"—"}</td><td class="px-2 py-2 font-mono">${p.horario||"—"}</td></tr>`)}</tbody>
+      </table></div>${vis.length>600&&html`<p class="text-xs text-muted mt-3">Exibindo os primeiros 600 resultados. Refine a busca.</p>`}
+      ${estado==="ok"&&!vis.length&&html`<p class="text-sm text-muted py-5">Nenhum registro encontrado. Se a tabela deveria conter colaboradores, confira as políticas de leitura.</p>`}
+    </${Card}>
+  </div>`;
+}
+
 function App(){
   const [view,setViewRaw]=useState(()=>{try{return localStorage.getItem("kn-painel-view")||"escalas"}catch(e){return "escalas"}});
   const setView=v=>{setViewRaw(v);try{localStorage.setItem("kn-painel-view",v)}catch(e){}window.scrollTo({top:0})};
@@ -1661,7 +1721,8 @@ function App(){
     <main class="max-w-7xl mx-auto px-4 pt-24 pb-16">
       ${status.ok===false&&!carregando&&html`<div class="rounded-2xl px-4 py-3 text-sm mb-4" style=${{background:"color-mix(in srgb,var(--red) 10%,transparent)",color:"var(--red)"}}>Sem conexão com a nuvem. Confira a internet ou a conexão em ⚙ Configurações. As escalas voltam a aparecer quando a conexão voltar.</div>`}
       <${AnimatePresence} mode="wait">
-        ${view==="historico"?html`<${HistoricoView} key="h" historico=${historico} escalas=${escalas} podeEditar=${podeEditar} ops=${ops}/>`
+        ${view==="grupos"?html`<${GruposView} key="grupos"/>`
+          :view==="historico"?html`<${HistoricoView} key="h" historico=${historico} escalas=${escalas} podeEditar=${podeEditar} ops=${ops}/>`
           :view==="cobertura"?html`<${CoberturaView} key="c" escalas=${escalas} historico=${historico} versao=${versao} regrasNuvem=${dados.regras} podeEditar=${podeEditar} toast=${toast} carregando=${carregando}/>`
           :view==="antigas"?html`<${AntigasView} key="a" escalas=${escalas} carregando=${carregando} ordem=${dados.ordemHorarios} onSalvarOrdem=${cols=>gravar(()=>salvarOrdemHorarios(cols),"Ordem dos horários salva para todos.")} irPara=${id=>{setFoco({id,t:Date.now()});setViewRaw("escalas");try{localStorage.setItem("kn-painel-view","escalas")}catch(e){}}}/>`
           :html`<${EscalasView} key="e" escalas=${escalas} podeEditar=${podeEditar} ops=${ops} carregando=${carregando} foco=${foco} onCfg=${()=>setCfgOpen(true)}/>`}
