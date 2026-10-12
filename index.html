@@ -652,15 +652,16 @@ function calcularDia(escalas,dia,saidas,pode){
   dia={...DIA_VAZIO,...(dia||{})};const trocas=dia.trocas||[];const absQ=dia.absQtd||{};
   const gs=escalas.filter(g=>g.tipo!=="cargo"&&rotuloTurno(g.turno));const code={};gs.forEach(g=>code[g._id]=g.code);
   const movidos=new Set(trocas.filter(t=>t.pessoaId&&!t.pulmaoId).map(t=>t.pessoaId));
+  const folgaInd=new Set();(dia.pend||[]).forEach(p=>{if(p.status!=="folga")return;const h=acharNoHC(gs,p.cpf,p.nome);if(h)folgaInd.add(h.p.id)});
   const nos=gs.map(g=>{const r=rotuloTurno(g.turno);
     const folga=!!dia.folga[g._id];const aus=new Set(dia.ausentes[g._id]||[]);const ps=g.pessoas||[];
     const ausN=folga?[]:ps.filter(p=>aus.has(p.id));
-    let base=folga?[]:ps.filter(p=>!aus.has(p.id)&&!movidos.has(p.id));
+    let base=folga?[]:ps.filter(p=>!aus.has(p.id)&&!movidos.has(p.id)&&!folgaInd.has(p.id));
     const anon=folga?0:Math.min(absQ[g._id]||0,base.length);if(anon)base=base.slice(0,base.length-anon);
     const sai=folga?[]:trocas.filter(t=>t.pessoaId&&!t.pulmaoId&&t.de===g._id);
     const entra=trocas.filter(t=>t.para===g._id).map(t=>({id:t.pulmaoId||t.pessoaId||t.id,nome:t.nome,cpf:t.cpf,troca:t.id}));
     const presentes=[...base,...entra];
-    const previsto=previstoDe(g);const precisa=folga?0:(dia.precisa[g._id]??previsto);
+    const previsto=previstoDe(g);const precisa=folga?0:Math.max(0,(dia.precisa[g._id]??previsto)-ps.filter(p=>folgaInd.has(p.id)).length);
     const vagaFixa=Math.max(0,precisa-ps.length);const sd=saidas[g._id]||[];
     const vagas=Array.from({length:vagaFixa},(_,i)=>({tipo:"vaga",...(sd[i]||{nome:null})}));
     const motivos=[...ausN.map(p=>({tipo:"abs",pessoa:p})),...Array.from({length:anon},()=>({tipo:"abs",pessoa:null})),...sai.map(t=>({tipo:"troca",nome:t.nome,para:code[t.para]||"?"})),...vagas];
@@ -1064,11 +1065,16 @@ function acharNoHC(escalas,cpf,nome){
   return null;
 }
 function mesclarPend(dia,itens,escalas){
-  dia={...DIA_VAZIO,...(dia||{})};const pend=[...(dia.pend||[])];const folga={...dia.folga};let novas=0;const folgas=[];
+  dia={...DIA_VAZIO,...(dia||{})};const pend=[...(dia.pend||[])];const folga={...dia.folga};const auto={...(dia.folgaAuto||{})};let novas=0;const folgas=[];
   itens.forEach(it=>{const k=dg(it.cpf)||norm(it.nome);if(pend.some(p=>(dg(p.cpf)||norm(p.nome))===k))return;
-    pend.push({id:"m"+Date.now().toString(36)+Math.random().toString(36).slice(2,6),nome:it.nome,cpf:it.cpf,min:it.min,status:it.status,feito:false});novas++;
-    if(it.status==="folga"){const h=acharNoHC(escalas,it.cpf,it.nome);if(h&&h.g.tipo!=="cargo"&&!folga[h.g._id]){folga[h.g._id]=true;folgas.push(h.g.code)}}});
-  return {dia:{...dia,pend,folga},novas,folgas};
+    pend.push({id:"m"+Date.now().toString(36)+Math.random().toString(36).slice(2,6),nome:it.nome,cpf:it.cpf,min:it.min,status:it.status,feito:false});novas++});
+  /* escala de folga só se TODOS dela que bateram ponto vieram como "Dia de folga";
+     se alguém da escala veio com horário incompatível ou sem solicitação, ela estava trabalhando */
+  const porEsc={};pend.forEach(p=>{const h=acharNoHC(escalas,p.cpf,p.nome);if(!h||h.g.tipo==="cargo")return;(porEsc[h.g._id]??={code:h.g.code,st:[]}).st.push(p.status)});
+  Object.entries(porEsc).forEach(([gid,x])=>{const todasFolga=x.st.every(s=>s==="folga");
+    if(todasFolga&&!folga[gid]){folga[gid]=true;auto[gid]=true;folgas.push(x.code)}
+    else if(!todasFolga&&folga[gid]&&(auto[gid]||x.st.some(s=>s==="horario"))){delete folga[gid];delete auto[gid]}});
+  return {dia:{...dia,pend,folga,folgaAuto:auto},novas,folgas};
 }
 /* horário de escala mais provável para uma batida (chegar antes é o normal) */
 function horaRef(min,horas){if(min==null||!horas.length)return null;let best=null,bc=Infinity;
@@ -1192,8 +1198,8 @@ function infoPend(p,calc,escalas){
 function montarPend(x,D,calc){
   const {p,hc,own,ref}=x;const n=calc.byId[D];if(!n)return null;
   const movidos=new Set(calc.trocas.filter(t=>t.pessoaId&&!t.pulmaoId).map(t=>t.pessoaId));
-  if(own&&own.id===D)return {pend:{destino:D,propria:true,trocaId:null,extraId:null}};
-  if(hc&&own&&!own.folga&&calc.presentesIds.has(hc.p.id)&&!movidos.has(hc.p.id)){const id=nidT();
+  if(own&&own.id===D&&p.status!=="folga")return {pend:{destino:D,propria:true,trocaId:null,extraId:null}};
+  if(p.status!=="folga"&&hc&&own&&!own.folga&&calc.presentesIds.has(hc.p.id)&&!movidos.has(hc.p.id)){const id=nidT();
     return {pend:{destino:D,propria:false,trocaId:id,extraId:null},troca:{id,pessoaId:hc.p.id,nome:hc.p.nome,cpf:hc.p.cpf||p.cpf,de:own.id,para:D,feito:false,meli:p.id}}}
   const ex={id:"x"+Date.now().toString(36)+Math.random().toString(36).slice(2,6),pessoaId:hc?hc.p.id:null,nome:hc?hc.p.nome:p.nome,cpf:p.cpf||"",groot:x.dz?x.dz.groot:"",diarista:!!x.dz,hora:ref??n.hora,origem:p.status==="folga"?"folga":hc?"sem":"extra",escala:hc?hc.g.code:"",meli:p.id};
   const id=nidT();return {pend:{destino:D,propria:false,trocaId:id,extraId:ex.id},extra:ex,troca:{id,pulmaoId:ex.id,pessoaId:ex.pessoaId,nome:ex.nome,cpf:p.cpf,de:null,para:D,origem:ex.origem,feito:false,meli:p.id}};
@@ -1220,11 +1226,12 @@ function planejarAtribuicao(calc,escalas,pode){
   const podeSair=p=>!presenteNaSua(p)||(p.own.saldo-(saiu[p.own.id]||0))>0;
   const furo=(p,r)=>{const sai=presenteNaSua(p)&&p.own.id!==r.n.id;if(sai)saiu[p.own.id]=(saiu[p.own.id]||0)+1;
     return {D:r.n.id,tom:"green",porque:`cobre ${motNome(r.vaga.mot)}`+(sai?` · a ${p.own.g.code} tinha sobra, não abre furo`:"")}};
-  const tenta=(p,quer)=>{if(!podeSair(p)&&!(p.own&&vagas[p.own.id]&&vagas[p.own.id].length))return;
-    if(!podeSair(p)){const l=vagas[p.own.id];let i=quer==null?0:l.findIndex(v=>(quer==="fixa")===v.fixa);if(i<0)i=0;res[p.key]=furo(p,{n:p.own,vaga:l.splice(i,1)[0]});return}
+  const tenta=(p,quer)=>{
+    if(!podeSair(p)){res[p.key]={D:p.own.id,tom:"amber",porque:`própria escala · bateu ${p.min!=null?"às "+hm(p.min)+", ":""}fora do horário dela, mas tirar dela abriria furo`};return}
     const r=pegar(p,quer);if(r)res[p.key]=furo(p,r)};
   /* 1) quem é do HC e bateu no horário da própria escala: só atribuir na própria */
-  pessoas.forEach(p=>{if(p.own&&!p.own.folga&&(p.ref==null||p.ref===p.own.hora))res[p.key]={D:p.own.id,tom:"green",porque:"própria escala, horário bate"}});
+  pessoas.forEach(p=>{if(p.status==="folga")return;if(p.own&&!p.own.folga&&(p.ref==null||p.ref===p.own.hora))res[p.key]={D:p.own.id,tom:"green",porque:"própria escala, horário bate"};
+    else if(p.own&&p.status==="horario")res[p.key]={D:p.own.id,tom:"green",porque:`própria escala · é da ${p.own.g.code} e só bateu o ponto fora do horário${p.min!=null?" ("+hm(p.min)+")":""}`}});
   const ordem=[...pessoas].sort((a,b)=>(a.min??9999)-(b.min??9999));
   /* 2) diaristas cobrem primeiro o quadro a menos  3) quem é do sistema cobre os ABS  4) o resto, qualquer furo */
   ordem.filter(p=>!res[p.key]&&p.diarista).forEach(p=>tenta(p,"fixa"));
@@ -1232,7 +1239,7 @@ function planejarAtribuicao(calc,escalas,pode){
   ordem.filter(p=>!res[p.key]).forEach(p=>tenta(p,null));
   /* 5) sem furo compatível: própria escala se o horário permite, senão a escala mais próxima do horário da batida */
   ordem.filter(p=>!res[p.key]).forEach(p=>{
-    if(presenteNaSua(p)||(p.own&&!p.own.folga&&(p.ref==null||pode(p.ref,p.own.hora)))){res[p.key]={D:p.own.id,tom:"amber",porque:presenteNaSua(p)?"fica na própria escala · tirar dela abriria furo":"sem furo no horário · fica na própria escala (sobra)"};return}
+    if(presenteNaSua(p)||(p.status!=="folga"&&p.own&&!p.own.folga&&(p.ref==null||pode(p.ref,p.own.hora)))){res[p.key]={D:p.own.id,tom:"amber",porque:presenteNaSua(p)?"fica na própria escala · tirar dela abriria furo":"sem furo no horário · fica na própria escala (sobra)"};return}
     const c=calc.nos.filter(n=>!n.folga&&(p.ref==null||pode(p.ref,n.hora))).sort((a,b)=>dist(p,a)-dist(p,b)||a.saldo-b.saldo)[0];
     res[p.key]=c?{D:c.id,tom:"amber",porque:"sem furo no horário · entra como sobra na escala mais próxima da batida"}:{D:"",tom:"red",porque:"nenhuma escala com horário compatível com a batida"}});
   /* fora da escala correta: é do HC e bateu num horário diferente do da escala dele(a) */
