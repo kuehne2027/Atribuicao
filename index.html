@@ -1424,7 +1424,8 @@ function CoberturaView({escalas,historico,versao,regrasNuvem,podeEditar,toast,ca
   useEffect(()=>{if(!ok||!podeEditar||tentados.current.has(data))return;if(dia.planilha&&dia.planilha.em&&dia.planilha.contagem!==undefined&&Date.now()-new Date(dia.planilha.em).getTime()<15*60e3)return;if(difDias(hojeISO(),data)>PRAZO_DIAS||difDias(data,hojeISO())>0)return;
     tentados.current.add(data);puxar(true)},[ok,data]);
   const puxarRef=useRef(puxar);puxarRef.current=puxar;
-  useEffect(()=>{if(!ok||!podeEditar||data!==hojeISO())return;const t=setInterval(()=>{if(document.visibilityState==='visible'&&puxarRef.current)puxarRef.current(true)},5*60e3);return()=>clearInterval(t)},[ok,data,podeEditar]);
+  useEffect(()=>{const f=()=>{if(data===hojeISO()&&puxarRef.current)puxarRef.current(true)};window.addEventListener("kn-ping",f);return()=>window.removeEventListener("kn-ping",f)},[data]);
+  useEffect(()=>{if(!ok||!podeEditar||data!==hojeISO())return;const t=setInterval(()=>{if(document.visibilityState==='visible'&&puxarRef.current)puxarRef.current(true)},2*60e3);return()=>clearInterval(t)},[ok,data,podeEditar]);
   const importarMeli=async porData=>{try{let tot=0;const fol=[];const ds=Object.keys(porData).sort();
     for(const d of ds){
       if(d===data){const r=mesclarPend(dia,porData[d],escalas);tot+=r.novas;fol.push(...r.folgas.map(c=>c+" em "+dm(d)));mudar(x=>mesclarPend(x,porData[d],escalas).dia)}
@@ -1603,48 +1604,127 @@ async function lerGruposOficiais(){
   }
   return todos;
 }
-function GruposAcesso({onEntrar}){
-  const [estado,setEstado]=useState(""),[erro,setErro]=useState("");
-  const entrar=async()=>{setEstado("enviando");setErro("");try{
-    const c=await nuvem();const {error}=await c.auth.signInWithOtp({email:"kuehne2027@gmail.com",options:{emailRedirectTo:location.origin+location.pathname,shouldCreateUser:false}});
-    if(error)throw error;setEstado("enviado");
-  }catch(e){setErro(e.message||String(e));setEstado("")}};
-  return html`<${Card} title="Acesso privado · GRUPOS">
-    <h2 class="font-display text-xl">Entrar sem senha</h2>
-    <p class="text-sm text-muted mt-2">A consulta oficial é exclusiva da conta autorizada. Receba um link de acesso no e-mail cadastrado.</p>
-    <div class="mt-4"><${BtnPrim} onClick=${entrar} disabled=${estado==="enviando"||estado==="enviado"}>${estado==="enviando"?"Enviando…":estado==="enviado"?"Confira seu Gmail":"Enviar link de acesso"}</${BtnPrim}></div>
-    ${estado==="enviado"&&html`<p class="text-sm mt-3" style=${{color:"var(--green)"}}>Confira a caixa de entrada e abra o link no mesmo navegador.</p>`}
-    ${erro&&html`<p role="alert" class="text-sm mt-3" style=${{color:"var(--red)"}}>${erro}</p>`}
-    <p class="text-xs text-muted mt-4">Se o envio estiver indisponível por limite do Supabase, tente novamente somente após regularizar o serviço. Nenhuma chave secreta é usada neste aplicativo.</p>
-  </${Card}>`;
+/* ============ SINCRONIA AUTOMÁTICA COM A PLANILHA (sem login) ============
+   1) GRUPOS → escalas: quem entrou, saiu ou mudou de escala na aba GRUPOS muda sozinho aqui.
+   2) Presença KN → ABS do dia: puxa da planilha em segundo plano, mesmo fora da aba Cobertura.
+   3) "Aviso" da planilha (escpainel:ping): o Apps Script grava essa chave a cada edição e o painel puxa na hora. */
+const K_GSYNC="escpainel:gruposync",K_ASYNC="escpainel:abssync",K_PING="escpainel:ping";
+const GRUPOS_MIN=10*60e3, ABS_MIN=2*60e3;
+const hashTxt=s=>{let h=5381;for(let i=0;i<s.length;i++)h=((h<<5)+h+s.charCodeAt(i))|0;return (h>>>0).toString(36)};
+const toks=s=>norm(s).replace(/[^a-z ]/g," ").split(/\s+/).filter(t=>t.length>1&&!["de","da","do","dos","das","e"].includes(t));
+const chaveCurta=s=>{const t=toks(s);return t.length>1?t[0]+" "+t[t.length-1]:t[0]||""};
+/* trava simples entre aparelhos: só um faz a sincronia por vez */
+async function pegarVez(chave,intervalo,forcar){
+  let st=null;try{st=await lerChave(chave)}catch(e){}
+  const agora=Date.now();
+  if(st&&st.rodando&&agora-new Date(st.rodando).getTime()<90e3)return null;
+  if(!forcar&&st&&st.em&&agora-new Date(st.em).getTime()<intervalo)return null;
+  await salvarChave(chave,{...(st||{}),rodando:new Date().toISOString()});return st||{};
 }
-function GruposView(){
+function escalaDaLinha(escalas,r){
+  return acharEscala(escalas,r.escala_antiga,r.escala_descricao)||acharEscala(escalas,r.escala,r.turma)||acharEscala(escalas,"",r.escala)||null;
+}
+/* compara a GRUPOS com as escalas e devolve o que precisa mudar */
+function planoGrupos(escalas,linhas){
+  const porGroot=new Map(),porNome=new Map(),porCurto=new Map();
+  escalas.forEach(g=>(g.pessoas||[]).forEach(p=>{const it={p,g};
+    if(p.groot)porGroot.set(String(p.groot).trim(),it);
+    const n=norm(p.nome).trim();porNome.set(n,porNome.has(n)?null:it);
+    const c=chaveCurta(p.nome);porCurto.set(c,porCurto.has(c)?null:it)}));
+  const usados=new Set(),add=[],mover=[],atualizar=[],semEscala=[],gerenciadas=new Set();
+  linhas.forEach(r=>{const groot=String(r.groot_id||"").trim();const nome=String(r.nome||"").trim();if(!nome)return;
+    const g=escalaDaLinha(escalas,r);if(!g){semEscala.push(r);return}gerenciadas.add(g._id);
+    let ach=(groot&&porGroot.get(groot))||porNome.get(norm(nome).trim())||porCurto.get(chaveCurta(nome))||null;
+    if(ach&&usados.has(ach.p.id))ach=null;
+    if(!ach){add.push({g,pessoa:{id:novoId(),nome,cpf:"",groot,matricula:String(r.matricula||"")}});return}
+    usados.add(ach.p.id);
+    const novo={...ach.p,groot:groot||ach.p.groot||"",matricula:String(r.matricula||ach.p.matricula||"")};
+    const mudouNome=groot&&ach.p.groot===groot&&norm(ach.p.nome).trim()!==norm(nome).trim();if(mudouNome)novo.nome=nome;
+    if(ach.g._id!==g._id)mover.push({de:ach.g,para:g,antes:ach.p,pessoa:novo});
+    else if(novo.groot!==(ach.p.groot||"")||novo.matricula!==(ach.p.matricula||"")||mudouNome)atualizar.push({g,antes:ach.p,pessoa:novo,mudouNome});
+  });
+  const remover=[];escalas.forEach(g=>{if(!gerenciadas.has(g._id))return;(g.pessoas||[]).forEach(p=>{if(!usados.has(p.id))remover.push({g,p})})});
+  return {add,mover,atualizar,remover,semEscala};
+}
+async function sincronizarGrupos(escalas,{forcar=false}={}){
+  if(!escalas.length)return null;
+  const st=await pegarVez(K_GSYNC,GRUPOS_MIN,forcar);if(!st)return null;
+  const fim=async extra=>{await salvarChave(K_GSYNC,{...st,...extra,rodando:null,em:new Date().toISOString()})};
+  try{
+    const linhas=await lerGruposOficiais();
+    const hash=hashTxt(JSON.stringify(linhas.map(r=>[r.groot_id,r.nome,r.escala_antiga,r.escala_descricao,r.escala]).sort()));
+    if(!forcar&&hash===st.hash){await fim({});return {igual:true,total:linhas.length}}
+    const pl=planoGrupos(escalas,linhas);
+    const totalPessoas=escalas.reduce((s,g)=>s+(g.pessoas||[]).length,0);
+    /* trava: se a GRUPOS veio vazia ou bem menor (planilha quebrada), não tira ninguém */
+    const suspeita=linhas.length<20||(st.total&&linhas.length<st.total*0.8)||pl.remover.length>Math.max(10,totalPessoas*0.15);
+    const remover=suspeita?[]:pl.remover;
+    const porEsc={};const de=id=>(porEsc[id]??={add:[],tirar:new Set(),troca:new Map()});
+    pl.add.forEach(a=>de(a.g._id).add.push(a.pessoa));
+    pl.mover.forEach(m=>{de(m.de._id).tirar.add(m.antes.id);de(m.para._id).add.push(m.pessoa)});
+    pl.atualizar.forEach(u=>de(u.g._id).troca.set(u.antes.id,u.pessoa));
+    remover.forEach(r=>de(r.g._id).tirar.add(r.p.id));
+    for(const [id,o] of Object.entries(porEsc)){
+      await alterarEscala(id,x=>{const ids=new Set((x.pessoas||[]).map(p=>p.id));
+        return {...x,pessoas:[...(x.pessoas||[]).filter(p=>!o.tirar.has(p.id)).map(p=>o.troca.get(p.id)||p),...o.add.filter(p=>!ids.has(p.id))]}})}
+    const ev=[];
+    pl.add.forEach(a=>ev.push({tipo:"Adicionado",nome:a.pessoa.nome,escala:a.g.code,detalhe:"entrou pela aba GRUPOS"+(a.pessoa.groot?" · Groot "+a.pessoa.groot:"")}));
+    pl.mover.forEach(m=>ev.push({tipo:"Mudou de escala",nome:m.pessoa.nome,cpf:m.pessoa.cpf||"",escala:m.de.code,para:m.para.code,detalhe:"mudança feita na aba GRUPOS"}));
+    pl.atualizar.filter(u=>u.mudouNome).forEach(u=>ev.push({tipo:"Editado",nome:u.pessoa.nome,escala:u.g.code,detalhe:`nome: ${u.antes.nome} → ${u.pessoa.nome} (GRUPOS)`}));
+    remover.forEach(r=>ev.push({tipo:"Removido",motivo:"Saiu da GRUPOS",nome:r.p.nome,cpf:r.p.cpf||"",escala:r.g.code,escalaId:r.g._id,pessoa:r.p}));
+    if(suspeita&&pl.remover.length)ev.push({tipo:"GRUPOS com problema",nome:"Aba GRUPOS",detalhe:`${pl.remover.length} pessoa(s) sumiriam de uma vez (a GRUPOS veio com ${linhas.length} linha(s)). Por segurança ninguém foi tirado.`});
+    for(const e of ev){try{await registrar({area:"grupos",...e})}catch(_){}}
+    await fim({hash,total:linhas.length,semEscala:pl.semEscala.map(r=>({nome:r.nome,groot:r.groot_id,escala:r.escala_antiga||r.escala_descricao||r.escala||""})).slice(0,200),
+      ultimo:{add:pl.add.length,mover:pl.mover.length,remover:remover.length,bloqueados:suspeita?pl.remover.length:0,em:new Date().toISOString()}});
+    return {total:linhas.length,add:pl.add.length,mover:pl.mover.length,remover:remover.length,bloqueados:suspeita?pl.remover.length:0};
+  }catch(e){await fim({erro:e.message||String(e)}).catch(()=>{});throw e}
+}
+/* ABS do dia de hoje, em segundo plano */
+async function sincronizarAbsHoje(escalas,{forcar=false}={}){
+  if(!escalas.length)return null;
+  const st=await pegarVez(K_ASYNC,ABS_MIN,forcar);if(!st)return null;
+  const hoje=hojeISO();
+  try{const cfg=await cfgPlanilha();if(!cfg||!cfg.url){await salvarChave(K_ASYNC,{rodando:null,em:new Date().toISOString()});return null}
+    const r=await chamarPlanilha(cfg,hoje);if(!r||!r.ok)throw new Error(r&&r.erro||"A planilha não respondeu");r._absBruto=r.abs;
+    const dia=await lerChave(K_DIA+hoje);const x=aplicarPlanilha(dia,r,escalas);
+    await salvarChave(K_DIA+hoje,{...x.dia,em:new Date().toISOString()});
+    if(x.nAbs||x.removidos.length||x.alertaNovo){try{await registrar({area:"cobertura",dia:hoje,tipo:x.alertaNovo?"Planilha com problema":"Planilha puxada",nome:"Headcount KN 2026 (automático)",
+      detalhe:x.alertaNovo?`marcação caiu de ${x.alerta.antes} para ${x.alerta.agora} — ABS congelados`:`${x.nAbs} ABS novo(s)${x.removidos.length?" · voltou a presença: "+x.removidos.map(m=>m.nome).join(", "):""}`})}catch(_){}}
+    await salvarChave(K_ASYNC,{rodando:null,em:new Date().toISOString(),abs:(r.abs||[]).length});
+    return {abs:(r.abs||[]).length,novos:x.nAbs,removidos:x.removidos.length};
+  }catch(e){await salvarChave(K_ASYNC,{rodando:null,em:new Date().toISOString(),erro:e.message||String(e)}).catch(()=>{});throw e}
+}
+
+function GruposView({onSincronizar}){
   const [dados,setDados]=useState([]),[estado,setEstado]=useState("carregando"),[erro,setErro]=useState("");
-  const [filtro,setFiltro]=useState("");const [at,setAt]=useState("");
-  const [sessao,setSessao]=useState(null),[verificando,setVerificando]=useState(true);
-  useEffect(()=>{let vivo=true,sub; (async()=>{try{const c=await nuvem();const r=await c.auth.getSession();if(vivo)setSessao(r.data.session);const l=c.auth.onAuthStateChange((_event,s)=>{if(vivo)setSessao(s)});sub=l.data.subscription}catch(e){if(vivo)setErro(String(e))}finally{if(vivo)setVerificando(false)}})();return()=>{vivo=false;sub?.unsubscribe()}},[]);
+  const [filtro,setFiltro]=useState("");const [at,setAt]=useState("");const [info,setInfo]=useState(null);const [sinc,setSinc]=useState(false);
   const carregar=useCallback(async()=>{setEstado("carregando");setErro("");try{
-    const lista=await lerGruposOficiais();setDados(lista);setAt(new Date().toLocaleString("pt-BR"));setEstado("ok");
+    const [lista,s]=await Promise.all([lerGruposOficiais(),lerChave(K_GSYNC).catch(()=>null)]);setDados(lista);setInfo(s);setAt(new Date().toLocaleString("pt-BR"));setEstado("ok");
   }catch(e){setEstado("erro");setErro(e.message||String(e))}},[]);
-  useEffect(()=>{if(!sessao)return;carregar();const iv=setInterval(()=>{if(document.visibilityState==="visible")carregar()},5*60*1000);return()=>clearInterval(iv)},[carregar,sessao]);
+  useEffect(()=>{carregar();const iv=setInterval(()=>{if(document.visibilityState==="visible")carregar()},2*60*1000);return()=>clearInterval(iv)},[carregar]);
+  const agora=async()=>{setSinc(true);try{await onSincronizar();await carregar()}finally{setSinc(false)}};
   const q=norm(filtro.trim());const vis=useMemo(()=>dados.filter(p=>!q||norm([p.nome,p.groot_id,p.escala_descricao,p.escala,p.coordenador,p.horario].join(" ")).includes(q)),[dados,q]);
-  if(verificando)return html`<${Card}>Verificando acesso…</${Card}>`;
-  if(!sessao)return html`<${GruposAcesso}/>`;
+  const u=info&&info.ultimo;
   return html`<div class="grid gap-4">
-    <${Card} title="Cadastro oficial · GRUPOS" right=${html`<${BtnMini} onClick=${carregar} disabled=${estado==="carregando"}>↻ Atualizar</${BtnMini}>`}>
-      <div class="flex justify-between gap-2 flex-wrap"><h1 class="font-display text-xl sm:text-2xl">Colaboradores da planilha original</h1><${BtnMini} onClick=${async()=>{const c=await nuvem();await c.auth.signOut();setDados([]);setEstado("carregando")}}>Sair da conta</${BtnMini}></div>
-      <p class="text-sm text-muted mt-2">Consulta somente leitura da tabela kn_grupos_sync. Atualizada pelo Apps Script aproximadamente a cada hora. Alterações aqui não movimentam escalas, ABS ou coberturas.</p>
-      ${estado==="erro"&&html`<div role="alert" class="mt-4 rounded-xl border p-3 text-sm" style=${{color:"var(--red)",borderColor:"var(--red)"}}>Acesso à base GRUPOS indisponível: ${erro}. Verifique as permissões da tabela no Supabase. Não coloque a chave secreta no HTML.</div>`}
+    <${Card} title="Cadastro oficial · GRUPOS" right=${html`<span class="flex gap-2"><${BtnMini} onClick=${agora} disabled=${sinc}>${sinc?"Sincronizando…":"⇅ Sincronizar escalas agora"}</${BtnMini}><${BtnMini} onClick=${carregar} disabled=${estado==="carregando"}>↻ Atualizar</${BtnMini}></span>`}>
+      <h1 class="font-display text-xl sm:text-2xl">Colaboradores da planilha original</h1>
+      <p class="text-sm text-muted mt-2">A aba GRUPOS manda nas escalas: quem entra, sai ou muda de escala lá muda sozinho no painel (fica registrado no Histórico). Sem login.</p>
+      ${estado==="erro"&&html`<div role="alert" class="mt-4 rounded-xl border p-3 text-sm" style=${{color:"var(--red)",borderColor:"var(--red)"}}>Não deu para ler a base GRUPOS: ${erro}. Rode o SQL de leitura liberada no Supabase (veja o arquivo de instruções).</div>`}
       <div class="flex flex-wrap items-center gap-3 mt-4 text-sm"><${Pill} tom=${estado==="erro"?"red":estado==="carregando"?"amber":"green"}>${estado==="erro"?"Sem acesso":estado==="carregando"?"Consultando…":"Conectado"}</${Pill}>
-        <span>${dados.length} registros carregados</span><span class="text-muted">${at?"Última consulta: "+at:""}</span></div>
+        <span>${dados.length} registros</span><span class="text-muted">${at?"Última consulta: "+at:""}</span></div>
+      ${info&&info.em&&html`<div class="text-[12px] text-muted mt-2">Escalas sincronizadas com a GRUPOS às ${new Date(info.em).toLocaleString("pt-BR")}${u?` · última mudança: ${u.add} entrada(s), ${u.mover} troca(s) de escala, ${u.remover} saída(s)`:""}</div>`}
+      ${u&&u.bloqueados>0&&html`<div class="text-[12px] mt-2" style=${{color:"var(--amber)"}}>⚠ ${u.bloqueados} pessoa(s) sumiram da GRUPOS de uma vez. Por segurança ninguém foi tirado das escalas — confira a aba GRUPOS.</div>`}
+      ${info&&info.erro&&html`<div class="text-[12px] mt-2" style=${{color:"var(--red)"}}>Última sincronia falhou: ${info.erro}</div>`}
+      ${info&&(info.semEscala||[]).length>0&&html`<details class="text-[12px] mt-2"><summary class="cursor-pointer" style=${{color:"var(--amber)"}}>${info.semEscala.length} pessoa(s) da GRUPOS com escala que não existe no painel</summary>
+        <div class="mt-1 text-muted">${info.semEscala.map(x=>`${x.nome} (${x.escala||"sem escala"})`).join(" · ")}</div></details>`}
       <input type="search" class=${campo+" mt-4"} placeholder="Buscar nome, Groot ID, escala, coordenador ou horário" value=${filtro} onInput=${e=>setFiltro(e.target.value)}/>
     </${Card}>
     <${Card} title=${"Resultado · "+vis.length+" colaboradores"}>
       <div class="overflow-x-auto"><table class="w-full text-left text-[12px] sm:text-[13px] min-w-[780px]">
-        <thead><tr class="text-muted border-b border-line">${["Groot ID","Nome","Coordenador","Escala oficial","Escala antiga","Horário"].map(t=>html`<th class="px-2 py-3 font-semibold">${t}</th>`)}</tr></thead>
+        <thead><tr class="text-muted border-b border-line">${["Groot ID","Nome","Coordenador","Escala oficial","Escala antiga","Horário"].map(t=>html`<th key=${t} class="px-2 py-3 font-semibold">${t}</th>`)}</tr></thead>
         <tbody>${vis.slice(0,600).map(p=>html`<tr key=${p.groot_id} class="border-b border-[var(--sep)]"><td class="px-2 py-2 font-mono">${p.groot_id}</td><td class="px-2 py-2 font-medium">${p.nome}</td><td class="px-2 py-2">${p.coordenador||"—"}</td><td class="px-2 py-2" title=${p.escala_descricao||""}>${p.escala_descricao||p.escala||"—"}</td><td class="px-2 py-2">${p.escala_antiga||"—"}</td><td class="px-2 py-2 font-mono">${p.horario||"—"}</td></tr>`)}</tbody>
       </table></div>${vis.length>600&&html`<p class="text-xs text-muted mt-3">Exibindo os primeiros 600 resultados. Refine a busca.</p>`}
-      ${estado==="ok"&&!vis.length&&html`<p class="text-sm text-muted py-5">Nenhum registro encontrado. Se a tabela deveria conter colaboradores, confira as políticas de leitura.</p>`}
+      ${estado==="ok"&&!vis.length&&html`<p class="text-sm text-muted py-5">Nenhum registro encontrado.</p>`}
     </${Card}>
   </div>`;
 }
@@ -1663,6 +1743,15 @@ function App(){
     catch(e){console.error(e);setStatus(s=>({...s,ok:false}))}
     finally{setCarregando(false)}
   },[]);
+  /* sincronia automática: GRUPOS → escalas e Presença KN → ABS de hoje (forcar = veio aviso da planilha) */
+  const viewRef=useRef(view);viewRef.current=view;const rodandoSync=useRef(false);
+  const autoSync=useCallback(async forcar=>{if(rodandoSync.current)return;rodandoSync.current=true;
+    try{const d=await lerTudo();let mudou=false;
+      try{const g=await sincronizarGrupos(d.escalas,{forcar});if(g&&(g.add||g.mover||g.remover)){mudou=true;toast(`GRUPOS: ${g.add} entrada(s), ${g.mover} troca(s) de escala, ${g.remover} saída(s).`)}}catch(e){console.warn("GRUPOS",e)}
+      if(viewRef.current==="cobertura"&&forcar)window.dispatchEvent(new Event("kn-ping"));
+      if(viewRef.current!=="cobertura"){try{const a=await sincronizarAbsHoje(mudou?(await lerTudo()).escalas:d.escalas,{forcar});if(a&&(a.novos||a.removidos))mudou=true}catch(e){console.warn("ABS",e)}}
+      if(mudou)await recarregar()}
+    catch(e){console.warn(e)}finally{rodandoSync.current=false}},[recarregar]);
   useEffect(()=>{
     let alive=true,ch=null,tm=null;
     const agenda=()=>{clearTimeout(tm);tm=setTimeout(recarregar,300)};
@@ -1670,11 +1759,12 @@ function App(){
       try{const d=await lerTudo();const sc=d.escalas.find(x=>x._id==="sem-codigo"&&x.code==="Sem código");
         if(sc&&!d.escalas.some(x=>x.code==="T3.1")){await alterarEscala("sem-codigo",x=>x.code==="Sem código"?{...x,code:"T3.1"}:x);await registrar({tipo:"Renomeada",nome:"Escala T3.1",escala:"T3.1",detalhe:"nome: Sem código → T3.1"});await recarregar()}}catch(e){}
       try{const c=await nuvem();if(!alive)return;
-      ch=c.channel("kn-escalas-"+Math.random().toString(36).slice(2,8)).on("postgres_changes",{event:"*",schema:"public",table:TABELA},p=>{const k=(p.new&&p.new.state_key)||(p.old&&p.old.state_key)||"";if(!k||k.startsWith("esc"))agenda()}).subscribe()}catch(e){}})();
-    const iv=setInterval(recarregar,60000);const vis=()=>{if(document.visibilityState==="visible")recarregar()};
+      ch=c.channel("kn-escalas-"+Math.random().toString(36).slice(2,8)).on("postgres_changes",{event:"*",schema:"public",table:TABELA},p=>{const k=(p.new&&p.new.state_key)||(p.old&&p.old.state_key)||"";if(k===K_PING){autoSync(true);return}if(k===K_GSYNC||k===K_ASYNC)return;if(!k||k.startsWith("esc"))agenda()}).subscribe()}catch(e){}
+      autoSync(false)})();
+    const iv=setInterval(recarregar,60000);const ivS=setInterval(()=>{if(document.visibilityState==="visible")autoSync(false)},60e3);const vis=()=>{if(document.visibilityState==="visible")recarregar()};
     document.addEventListener("visibilitychange",vis);window.addEventListener("online",recarregar);
     const novoHist=()=>{clearTimeout(tm);tm=setTimeout(recarregar,1500)};window.addEventListener("kn-historico",novoHist);
-    return()=>{alive=false;clearInterval(iv);clearTimeout(tm);document.removeEventListener("visibilitychange",vis);window.removeEventListener("online",recarregar);window.removeEventListener("kn-historico",novoHist);try{ch&&sb.removeChannel(ch)}catch(e){}};
+    return()=>{alive=false;clearInterval(iv);clearInterval(ivS);clearTimeout(tm);document.removeEventListener("visibilitychange",vis);window.removeEventListener("online",recarregar);window.removeEventListener("kn-historico",novoHist);try{ch&&sb.removeChannel(ch)}catch(e){}};
   },[recarregar]);
   const {escalas,historico}=dados;
   /* toda gravação: marca "salvando", grava, registra no histórico e relê */
@@ -1721,7 +1811,7 @@ function App(){
     <main class="max-w-7xl mx-auto px-4 pt-24 pb-16">
       ${status.ok===false&&!carregando&&html`<div class="rounded-2xl px-4 py-3 text-sm mb-4" style=${{background:"color-mix(in srgb,var(--red) 10%,transparent)",color:"var(--red)"}}>Sem conexão com a nuvem. Confira a internet ou a conexão em ⚙ Configurações. As escalas voltam a aparecer quando a conexão voltar.</div>`}
       <${AnimatePresence} mode="wait">
-        ${view==="grupos"?html`<${GruposView} key="grupos"/>`
+        ${view==="grupos"?html`<${GruposView} key="grupos" onSincronizar=${()=>autoSync(true)}/>`
           :view==="historico"?html`<${HistoricoView} key="h" historico=${historico} escalas=${escalas} podeEditar=${podeEditar} ops=${ops}/>`
           :view==="cobertura"?html`<${CoberturaView} key="c" escalas=${escalas} historico=${historico} versao=${versao} regrasNuvem=${dados.regras} podeEditar=${podeEditar} toast=${toast} carregando=${carregando}/>`
           :view==="antigas"?html`<${AntigasView} key="a" escalas=${escalas} carregando=${carregando} ordem=${dados.ordemHorarios} onSalvarOrdem=${cols=>gravar(()=>salvarOrdemHorarios(cols),"Ordem dos horários salva para todos.")} irPara=${id=>{setFoco({id,t:Date.now()});setViewRaw("escalas");try{localStorage.setItem("kn-painel-view","escalas")}catch(e){}}}/>`
